@@ -161,8 +161,8 @@ with a throwaway Dart script whenever `lib/policy` changes:
 ```dart
 import 'dart:convert';
 import 'dart:io';
-import 'file:///root/tablet_browser/lib/policy/policy_config.dart';
-import 'file:///root/tablet_browser/lib/policy/policy_engine.dart';
+import 'package:tablet_browser/policy/policy_config.dart';
+import 'package:tablet_browser/policy/policy_engine.dart';
 
 void main() {
   final configs = <String, Map<String, dynamic>>{ /* config name -> config json */ };
