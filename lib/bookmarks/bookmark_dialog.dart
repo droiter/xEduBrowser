@@ -115,7 +115,9 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
       TextEditingController(text: widget.initialTitle);
   final TextEditingController _newCategory = TextEditingController();
   late bool _grant = widget.whitelistDefault;
-  late bool _wholeSite = widget.grantWholeSiteDefault;
+  // A local page cannot render without its sibling assets, so the folder is
+  // pre-selected for file:// bookmarks — otherwise the page loads blank.
+  late bool _wholeSite = widget.grantWholeSiteDefault || widget.url.startsWith('file://');
   late String _categoryId = widget.categoryId;
   bool _creatingCategory = false;
 
@@ -124,6 +126,8 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
   String get _urlPattern => BookmarkWhitelist.urlPattern(widget.url);
 
   String get _sitePattern => BookmarkWhitelist.sitePattern(widget.url);
+
+  bool get _isLocalFile => widget.url.startsWith('file://');
 
   @override
   void dispose() {
@@ -237,9 +241,12 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
                   contentPadding: EdgeInsets.zero,
                   value: _wholeSite,
                   onChanged: (value) => setState(() => _wholeSite = value ?? false),
-                  title: const Text('覆盖整个站点'),
+                  title: Text(_isLocalFile ? '放行该文件所在目录' : '覆盖整个站点'),
                   subtitle: Text(
-                    '打开后该域名的其他页面也可访问：$_sitePattern',
+                    _isLocalFile
+                        ? '强烈建议保持勾选：本地网页的样式、脚本、页面图片都在这个目录里，'
+                            '只放行 .html 文件会让页面显示为空白。范围：$_sitePattern'
+                        : '打开后该域名的其他页面也可访问：$_sitePattern',
                     style: theme.textTheme.bodySmall,
                   ),
                 ),

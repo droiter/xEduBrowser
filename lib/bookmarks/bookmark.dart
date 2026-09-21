@@ -308,7 +308,18 @@ abstract final class BookmarkWhitelist {
   static String sitePattern(String url) {
     final normalized = PatternNormalizer.normalizeUrl(url);
     final uri = Uri.tryParse(normalized);
-    if (uri == null || uri.host.isEmpty) return urlPattern(url);
+    if (uri == null) return urlPattern(url);
+    if (uri.scheme == 'file') {
+      // "The whole site" for a local page means the folder it lives in: a
+      // flipbook or courseware page loads its CSS, scripts and page images from
+      // siblings, and a rule covering only the .html file itself makes the page
+      // render blank.
+      final path = Uri.decodeComponent(uri.path);
+      final slash = path.lastIndexOf('/');
+      final directory = slash <= 0 ? '/' : path.substring(0, slash);
+      return directoryPattern(directory);
+    }
+    if (uri.host.isEmpty) return urlPattern(url);
     return '${uri.scheme}://${uri.host}';
   }
 

@@ -209,6 +209,65 @@ void main() {
     });
   });
 
+  group('local pages need their whole folder', () {
+    test('sitePattern maps a local file to the folder it lives in', () {
+      expect(
+        BookmarkWhitelist.sitePattern(
+            'file:///sdcard/Books/Caterpillar/Caterpillar%20ebook.html'),
+        'file:///sdcard/Books/Caterpillar/',
+      );
+      expect(BookmarkWhitelist.sitePattern('https://school.test/a/b'),
+          'https://school.test');
+    });
+
+    test('a local bookmark can grant the folder so its assets load', () async {
+      // This is the flipbook case: the page pulls CSS, scripts and page images
+      // from siblings. Granting only the .html file renders it blank.
+      final bookmark = await state.addBookmark(
+        url: 'file:///sdcard/Books/Caterpillar/Caterpillar%20ebook.html',
+        title: 'Caterpillar ebook',
+        wholeSite: true,
+      );
+
+      expect(bookmark.whitelistPattern, 'file:///sdcard/Books/Caterpillar/');
+      // The page's own assets are reachable...
+      expect(
+        state.engine
+            .decide('file:///sdcard/Books/Caterpillar/mobile/style/style.css')
+            .allowed,
+        isTrue,
+      );
+      expect(
+        state.engine
+            .decide('file:///sdcard/Books/Caterpillar/files/page/1.jpg')
+            .allowed,
+        isTrue,
+      );
+      // ...and anything outside the folder stays blocked.
+      expect(
+        state.engine.decide('file:///sdcard/Other/secret.html').allowed,
+        isFalse,
+      );
+    });
+
+    test('granting only the file leaves its assets blocked', () async {
+      // The old behaviour, kept as a regression guard so the blank-page cause
+      // stays documented.
+      final bookmark = await state.addBookmark(
+        url: 'file:///sdcard/Books/Caterpillar/Caterpillar%20ebook.html',
+        title: 'Caterpillar ebook',
+      );
+      expect(bookmark.whitelistPattern,
+          'file:///sdcard/Books/Caterpillar/Caterpillar%20ebook.html');
+      expect(
+        state.engine
+            .decide('file:///sdcard/Books/Caterpillar/mobile/javascript/main.js')
+            .allowed,
+        isFalse,
+      );
+    });
+  });
+
   group('removing a bookmark', () {
     test('removes the rule it created', () async {
       final bookmark = await state.addBookmark(
