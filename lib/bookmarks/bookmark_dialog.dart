@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../files/local_files_screen.dart';
 import '../state/app_scope.dart';
 import 'bookmark.dart';
 
@@ -57,8 +58,12 @@ Future<String?> showBookmarkRenameDialog(
       builder: (context) => _RenameDialog(initialTitle: initialTitle),
     );
 
+/// Test hook for the 浏览本地文件 button.
+const Key browseLocalFileKey = ValueKey<String>('bookmark-browse-local');
+
 /// Asks for an address, for adding a bookmark when no page is open (the home
-/// page's own ＋ tile).
+/// page's own ＋ tile). The address can be typed, or picked through the local
+/// file browser built into the app.
 Future<String?> showBookmarkUrlPrompt(BuildContext context) =>
     showDialog<String>(
       context: context,
@@ -324,6 +329,18 @@ class _UrlPromptDialogState extends State<_UrlPromptDialog> {
     super.dispose();
   }
 
+  /// Picks a page through the local file browser and fills the address in.
+  Future<void> _browseLocalFile() async {
+    final picked = await Navigator.of(context).push<String>(
+      MaterialPageRoute<String>(builder: (_) => const LocalFilesScreen()),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _url.text = picked;
+      _url.selection = TextSelection.collapsed(offset: picked.length);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -345,8 +362,19 @@ class _UrlPromptDialogState extends State<_UrlPromptDialog> {
                 border: OutlineInputBorder(),
               ),
             ),
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                key: browseLocalFileKey,
+                onPressed: _browseLocalFile,
+                icon: const Icon(Icons.folder_open, size: 18),
+                label: const Text('浏览本地文件'),
+              ),
+            ),
             const SizedBox(height: 8),
             Text(
+              '也可以在文件浏览器里找到本地网页，地址会自动填入。'
               '下一步可以设置标题、分类，并决定是否把它加入白名单。',
               style: Theme.of(context).textTheme.bodySmall,
             ),

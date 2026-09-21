@@ -469,26 +469,14 @@ class _BookmarkImportDialogState extends State<_BookmarkImportDialog> {
         ),
         const SizedBox(height: 8),
         Text(
-          '导入规则：只遍历所选目录的一级子目录，其中的 HTML 页面才会成为书签。',
+          '导入规则：所选目录下的 HTML 会直接导入；它的一级子目录也会被遍历，'
+          '其中的 HTML（含更深层的）同样会成为书签。',
           style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
         ),
-        if (plan.rootLevelHtmlCount > 0) ...[
-          const SizedBox(height: 8),
-          // The important explanation: a user pointing at a flat folder sees
-          // "0 pages" and would otherwise have no idea why.
-          _message(
-            context,
-            icon: Icons.subdirectory_arrow_right,
-            color: theme.colorScheme.error,
-            text: '所选目录下直接放着 ${plan.rootLevelHtmlCount} 个 HTML 文件，'
-                '它们不会被导入：规则是扫描一级子目录里的页面。'
-                '请把这些文件放进一个子目录，或改选它们的上一级目录后重试。',
-          ),
-        ],
-        if (plan.subdirectories.isEmpty) ...[
+        if (plan.subdirectories.isEmpty && plan.rootLevelHtmlCount == 0) ...[
           const SizedBox(height: 8),
           Text(
-            '所选目录下也没有一级子目录。',
+            '这个目录下既没有 HTML 文件，也没有一级子目录。',
             style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
           ),
         ],
@@ -521,7 +509,7 @@ class _BookmarkImportDialogState extends State<_BookmarkImportDialog> {
                 ),
                 const SizedBox(width: 12),
                 Text(
-                  candidate.subdirectory,
+                  candidate.subdirectory.isEmpty ? '所选目录' : candidate.subdirectory,
                   style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
                 ),
               ],

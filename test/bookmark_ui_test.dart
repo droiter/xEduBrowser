@@ -192,6 +192,64 @@ void main() {
     expect(result, isNull);
   });
 
+  testWidgets('the address step can pick a page through the local file browser',
+      (tester) async {
+    // A local page the browser can reach, inside the app's own directory.
+    File('${directory.path}/page.html')
+        .writeAsStringSync('<html><head><title>本地页</title></head></html>');
+
+    String? result;
+    tester.view.physicalSize = const Size(1400, 1100);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      AppScope(
+        state: state,
+        child: MaterialApp(
+          theme: AppTheme.light,
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  onPressed: () async =>
+                      result = await showBookmarkUrlPrompt(context),
+                  child: const Text('开始'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('开始'));
+    await tester.pumpAndSettle();
+
+    // The address step offers browsing; the file browser lists real files, so it
+    // needs real time interleaved with pumps.
+    await tester.tap(find.byKey(browseLocalFileKey));
+    for (var i = 0; i < 12; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 40)));
+      await tester.pump(const Duration(milliseconds: 60));
+    }
+    expect(find.textContaining('page.html'), findsWidgets,
+        reason: '文件浏览器应列出目录里的本地页');
+
+    await tester.tap(find.textContaining('page.html').first);
+    for (var i = 0; i < 8; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 40)));
+      await tester.pump(const Duration(milliseconds: 60));
+    }
+
+    // Back at the address step, the picked file URL is filled in.
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.controller?.text, 'file://${directory.path}/page.html');
+
+    await tester.tap(find.text('下一步'));
+    await tester.pumpAndSettle();
+    expect(result, 'file://${directory.path}/page.html');
+  });
+
   testWidgets('the grid reflows with the number of bookmarks', (tester) async {
     await tester.runAsync(() async {
       for (var i = 0; i < 5; i++) {

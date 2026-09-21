@@ -45,16 +45,27 @@ void main() {
   });
 
   group('scan', () {
-    test('collects the HTML of each first-level subdirectory', () async {
+    test('collects the HTML of the chosen directory and of its subdirectories',
+        () async {
       final plan = await BookmarkImporter.scan(root.path);
 
       expect(plan.subdirectories, ['math', 'science']);
-      expect(plan.fileCount, 3);
+      expect(plan.fileCount, 4);
       expect(
         plan.candidates.map((c) => c.filePath.split('/').last).toSet(),
-        {'lesson1.html', 'lesson2.html', 'lesson3.htm'},
+        {'top.html', 'lesson1.html', 'lesson2.html', 'lesson3.htm'},
       );
       expect(plan.truncated, isFalse);
+      // The chosen directory's own pages come first.
+      expect(plan.candidates.first.filePath.endsWith('top.html'), isTrue);
+    });
+
+    test('a page of the chosen directory is attributed to the directory itself',
+        () async {
+      final plan = await BookmarkImporter.scan(root.path);
+      final top = plan.candidates.firstWhere((c) => c.filePath.endsWith('top.html'));
+      expect(top.subdirectory, isEmpty);
+      expect(top.title, '顶层页面');
     });
 
     test('walks nested folders inside a subdirectory', () async {
@@ -69,11 +80,10 @@ void main() {
       expect(plan.candidates.any((c) => c.filePath.endsWith('.txt')), isFalse);
     });
 
-    test('reports HTML sitting directly in the chosen directory without importing it',
-        () async {
+    test('imports the HTML sitting directly in the chosen directory', () async {
       final plan = await BookmarkImporter.scan(root.path);
       expect(plan.rootLevelHtmlCount, 1);
-      expect(plan.candidates.any((c) => c.filePath.endsWith('top.html')), isFalse);
+      expect(plan.candidates.any((c) => c.filePath.endsWith('top.html')), isTrue);
     });
 
     test('reads the <title> and falls back to the file name', () async {
@@ -99,12 +109,16 @@ void main() {
       expect(plan.subdirectories, isEmpty);
     });
 
-    test('a directory with no subdirectories yields nothing', () async {
+    test('a directory with no subdirectories still yields its own pages', () async {
       final flat = Directory('${root.path}/science');
       expect(flat.existsSync(), isTrue);
       final plan = await BookmarkImporter.scan(flat.path);
-      expect(plan.isEmpty, isTrue);
+      expect(plan.isEmpty, isFalse);
+      expect(plan.subdirectories, isEmpty);
+      expect(plan.fileCount, 1);
       expect(plan.rootLevelHtmlCount, 1);
+      expect(plan.candidates.single.filePath.endsWith('lesson3.htm'), isTrue);
+      expect(plan.candidates.single.subdirectory, isEmpty);
     });
 
     test('URLs default to file:// and switch to loopback inside the served root',
@@ -169,14 +183,17 @@ void main() {
         whitelistScope: BookmarkWhitelistScope.none,
       );
 
-      expect(outcome.added, 3);
+      expect(outcome.added, 4);
       expect(outcome.skipped, 0);
       expect(outcome.subdirectoryCount, 2);
 
       final imported = state.bookmarksIn(category.id);
-      expect(imported.length, 3);
-      expect(imported.map((b) => b.order), [0, 1, 2]);
-      expect(imported.first.title, '第一课 加法');
+      expect(imported.length, 4);
+      expect(imported.map((b) => b.order), [0, 1, 2, 3]);
+      // The chosen directory's own page is imported first, then the subdirectories.
+      expect(imported.first.title, '顶层页面');
+      expect(imported.map((b) => b.title),
+          ['顶层页面', '第一课 加法', '第二课 减法', 'lesson3']);
       expect(imported.every((b) => b.url.startsWith('file://')), isTrue);
       // Nothing was granted.
       expect(state.policy.rulesOf(PolicyListKind.whitelist), isEmpty);
@@ -187,8 +204,8 @@ void main() {
         directoryPath: root.path,
         categoryId: uncategorizedId,
       );
-      expect(outcome.added, 3);
-      expect(state.bookmarksIn(uncategorizedId).length, 3);
+      expect(outcome.added, 4);
+      expect(state.bookmarksIn(uncategorizedId).length, 4);
     });
 
     test('the directory scope adds one rule covering the whole subtree', () async {
@@ -216,8 +233,8 @@ void main() {
         categoryId: uncategorizedId,
         whitelistScope: BookmarkWhitelistScope.perFile,
       );
-      expect(outcome.added, 3);
-      expect(state.policy.rulesOf(PolicyListKind.whitelist).length, 3);
+      expect(outcome.added, 4);
+      expect(state.policy.rulesOf(PolicyListKind.whitelist).length, 4);
     });
 
     test('re-importing skips pages that are already bookmarked', () async {
@@ -232,10 +249,10 @@ void main() {
         whitelistScope: BookmarkWhitelistScope.none,
       );
 
-      expect(first.added, 3);
+      expect(first.added, 4);
       expect(second.added, 0);
-      expect(second.skipped, 3);
-      expect(state.bookmarks.length, 3);
+      expect(second.skipped, 4);
+      expect(state.bookmarks.length, 4);
     });
 
     test('an empty directory imports nothing and grants nothing', () async {
@@ -255,7 +272,7 @@ void main() {
         categoryId: uncategorizedId,
         whitelistScope: BookmarkWhitelistScope.none,
       );
-      expect(outcome.summary, '已导入 3 个书签');
+      expect(outcome.summary, '已导入 4 个书签');
 
       final again = await state.importBookmarksFromDirectory(
         directoryPath: root.path,
@@ -263,7 +280,7 @@ void main() {
         whitelistScope: BookmarkWhitelistScope.none,
       );
       expect(again.summary, contains('已导入 0 个书签'));
-      expect(again.summary, contains('跳过 3 个'));
+      expect(again.summary, contains('跳过 4 个'));
     });
 
     test('imported bookmarks can be reordered and moved like any other', () async {

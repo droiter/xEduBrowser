@@ -54,10 +54,9 @@ class BookmarkImportPlan {
   /// The scan stopped at the file cap; the remainder was not read.
   final bool truncated;
 
-  /// HTML files sitting directly in the chosen directory. They are **not**
-  /// imported (the rule is "the HTML inside the first-level subdirectories"),
-  /// but knowing they exist lets the UI explain an empty result instead of
-  /// leaving the user puzzled.
+  /// HTML files sitting directly in the chosen directory. They are imported
+  /// too — a folder of hand-made pages usually keeps its `index.html` beside
+  /// its subfolders, and skipping those surprised people.
   final int rootLevelHtmlCount;
 
   const BookmarkImportPlan({
@@ -89,9 +88,9 @@ abstract final class BookmarkImporter {
 
   /// Scans [rootPath].
   ///
-  /// Only **first-level** subdirectories are considered, as specified; hidden
-  /// directories are skipped, and each subdirectory is walked recursively so a
-  /// nested static-site export still imports.
+  /// Collects the HTML pages of the chosen directory itself **and** of its
+  /// first-level subdirectories (each walked recursively, so a nested
+  /// static-site export still imports). Hidden directories are skipped.
   static Future<BookmarkImportPlan> scan(
     String rootPath, {
     String? localServerBase,
@@ -115,13 +114,26 @@ abstract final class BookmarkImporter {
         if (entity is Directory && !_isHidden(entity.path)) _baseName(entity.path),
     ]..sort();
 
-    var rootLevelHtml = 0;
-    for (final entity in rootEntries) {
-      if (entity is File && _isPage(entity.path)) rootLevelHtml++;
-    }
+    // Pages sitting directly in the chosen directory, in name order.
+    final rootFiles = <File>[
+      for (final entity in rootEntries)
+        if (entity is File && _isPage(entity.path)) entity,
+    ]..sort((a, b) => a.path.toLowerCase().compareTo(b.path.toLowerCase()));
+    final rootLevelHtml = rootFiles.length;
 
-    final candidates = <ImportCandidate>[];
-    var truncated = false;
+    final candidates = <ImportCandidate>[
+      for (final file in rootFiles)
+        ImportCandidate(
+          filePath: file.path,
+          url: _urlFor(file.path, localServerBase, localServerRoot),
+          title: readHtmlTitle(file.path) ?? _titleFromFileName(file.path),
+          subdirectory: '',
+        ),
+    ];
+    if (candidates.length > maxFiles) {
+      candidates.removeRange(maxFiles, candidates.length);
+    }
+    var truncated = candidates.length >= maxFiles;
 
     for (final name in subdirectoryNames) {
       if (candidates.length >= maxFiles) {
