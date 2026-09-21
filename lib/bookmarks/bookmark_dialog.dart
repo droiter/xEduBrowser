@@ -116,8 +116,12 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
   final TextEditingController _newCategory = TextEditingController();
   late bool _grant = widget.whitelistDefault;
   // A local page cannot render without its sibling assets, so the folder is
-  // pre-selected for file:// bookmarks — otherwise the page loads blank.
-  late bool _wholeSite = widget.grantWholeSiteDefault || widget.url.startsWith('file://');
+  // pre-selected for file:// bookmarks — otherwise the page loads blank. Files
+  // sitting directly in a storage root are the exception: their "folder" is the
+  // whole device, which is never what the user meant by default.
+  late bool _wholeSite = widget.grantWholeSiteDefault ||
+      (widget.url.startsWith('file://') &&
+          BookmarkWhitelist.wholeSiteWidens(widget.url));
   late String _categoryId = widget.categoryId;
   bool _creatingCategory = false;
 
@@ -244,8 +248,11 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
                   title: Text(_isLocalFile ? '放行该文件所在目录' : '覆盖整个站点'),
                   subtitle: Text(
                     _isLocalFile
-                        ? '强烈建议保持勾选：本地网页的样式、脚本、页面图片都在这个目录里，'
-                            '只放行 .html 文件会让页面显示为空白。范围：$_sitePattern'
+                        ? (BookmarkWhitelist.wholeSiteWidens(widget.url)
+                            ? '强烈建议保持勾选：本地网页的样式、脚本、页面图片都在这个目录里，'
+                                '只放行 .html 文件会让页面显示为空白。范围：$_sitePattern'
+                            : '这个文件就在存储卡根目录下，放行它的目录等于放行整张存储卡，'
+                                '所以只放行该文件：$_urlPattern')
                         : '打开后该域名的其他页面也可访问：$_sitePattern',
                     style: theme.textTheme.bodySmall,
                   ),

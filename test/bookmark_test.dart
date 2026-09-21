@@ -220,6 +220,27 @@ void main() {
           'https://school.test');
     });
 
+    test('a file in a storage root never widens to the whole device', () {
+      // Granting "its folder" here would allow all of /sdcard.
+      for (final url in [
+        'file:///sdcard/page.html',
+        'file:///storage/emulated/0/page.html',
+        'file:///mnt/sdcard/page.html',
+        'file:///storage/1A2B-3C4D/page.html',
+      ]) {
+        expect(BookmarkWhitelist.sitePattern(url),
+            BookmarkWhitelist.urlPattern(url),
+            reason: url);
+        expect(BookmarkWhitelist.wholeSiteWidens(url), isFalse, reason: url);
+      }
+      // One level in, the folder scope is meaningful again.
+      expect(BookmarkWhitelist.sitePattern('file:///sdcard/Books/page.html'),
+          'file:///sdcard/Books/');
+      expect(BookmarkWhitelist.wholeSiteWidens('file:///sdcard/Books/page.html'),
+          isTrue);
+      expect(BookmarkWhitelist.wholeSiteWidens('https://school.test/a'), isTrue);
+    });
+
     test('a local bookmark can grant the folder so its assets load', () async {
       // This is the flipbook case: the page pulls CSS, scripts and page images
       // from siblings. Granting only the .html file renders it blank.

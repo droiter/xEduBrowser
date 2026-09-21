@@ -317,6 +317,10 @@ abstract final class BookmarkWhitelist {
       final path = Uri.decodeComponent(uri.path);
       final slash = path.lastIndexOf('/');
       final directory = slash <= 0 ? '/' : path.substring(0, slash);
+      // A page sitting directly in a storage root would turn "its folder" into
+      // the whole shared storage — far wider than the user asked for. Keep the
+      // rule on the file and let them widen it deliberately.
+      if (isStorageRoot(directory)) return urlPattern(url);
       return directoryPattern(directory);
     }
     if (uri.host.isEmpty) return urlPattern(url);
@@ -330,5 +334,23 @@ abstract final class BookmarkWhitelist {
         ? directoryPath.substring(0, directoryPath.length - 1)
         : directoryPath;
     return 'file://$trimmed/';
+  }
+
+  /// Whether granting [url]'s "whole site" actually widens the rule beyond the
+  /// URL itself — false when the scope cannot be widened safely (a local file
+  /// directly in a storage root, or a malformed URL).
+  static bool wholeSiteWidens(String url) => sitePattern(url) != urlPattern(url);
+
+  /// Storage roots (`/sdcard`, `/storage/emulated/0`, `/mnt/sdcard`, …): a rule
+  /// for a folder here would grant everything on the device.
+  static bool isStorageRoot(String directoryPath) {
+    final dir = directoryPath.endsWith('/') && directoryPath.length > 1
+        ? directoryPath.substring(0, directoryPath.length - 1)
+        : directoryPath;
+    if (dir.isEmpty || dir == '/') return true;
+    if (dir == '/sdcard' || dir == '/mnt/sdcard' || dir == '/storage/self/primary') {
+      return true;
+    }
+    return RegExp(r'^/storage/(emulated/\d+|[^/]+)$').hasMatch(dir);
   }
 }

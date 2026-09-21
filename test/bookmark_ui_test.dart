@@ -263,4 +263,54 @@ void main() {
       expect(find.text('站点 $i'), findsOneWidget);
     }
   });
+
+  Future<void> pumpForm(WidgetTester tester, String url) async {
+    await tester.pumpWidget(
+      AppScope(
+        state: state,
+        child: MaterialApp(
+          theme: AppTheme.light,
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  onPressed: () => showBookmarkDialog(
+                    context,
+                    url: url,
+                    whitelistDefault: true,
+                  ),
+                  child: const Text('开始'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('开始'));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('a local page in its own folder pre-grants that folder',
+      (tester) async {
+    await pumpForm(
+        tester, 'file:///sdcard/Books/Caterpillar/Caterpillar%20ebook.html');
+
+    final tile = tester.widget<CheckboxListTile>(
+        find.widgetWithText(CheckboxListTile, '放行该文件所在目录'));
+    expect(tile.value, isTrue);
+    // The rule the user is about to create is the folder, not the .html file.
+    expect(
+        find.textContaining('file:///sdcard/Books/Caterpillar/'), findsWidgets);
+  });
+
+  testWidgets('a local page in a storage root stays file-only', (tester) async {
+    await pumpForm(tester, 'file:///sdcard/page.html');
+
+    final tile = tester.widget<CheckboxListTile>(
+        find.widgetWithText(CheckboxListTile, '放行该文件所在目录'));
+    expect(tile.value, isFalse);
+    expect(find.textContaining('整张存储卡'), findsOneWidget);
+    expect(find.textContaining('file:///sdcard/page.html'), findsWidgets);
+  });
 }
