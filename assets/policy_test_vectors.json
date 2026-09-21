@@ -1,0 +1,236 @@
+{
+  "version": 1,
+  "_comment": "Hand-authored from the written specification. BOTH the Dart engine (test/policy_vectors_test.dart) and the Kotlin engine (android/app/src/test/kotlin/.../PolicyVectorsTest.kt) assert these same expectations, so the two independent implementations are cross-checked against the spec rather than against each other.",
+  "configs": {
+    "prefixBlacklist": {
+      "enabled": true,
+      "unmatchedAction": "auto",
+      "conflictResolution": "blacklistWins",
+      "strictDomainBoundary": false,
+      "rules": [
+        {"pattern": "https://example.com/ads", "kind": "blacklist"}
+      ]
+    },
+    "bareDomainBlacklist": {
+      "enabled": true,
+      "rules": [
+        {"pattern": "ads.example.com", "kind": "blacklist"}
+      ]
+    },
+    "caseAndPort": {
+      "enabled": true,
+      "rules": [
+        {"pattern": "Example.COM/Ads", "kind": "blacklist"}
+      ]
+    },
+    "whitelistMode": {
+      "enabled": true,
+      "rules": [
+        {"pattern": "https://school.test/", "kind": "whitelist"}
+      ]
+    },
+    "unmatchedAllowExplicit": {
+      "enabled": true,
+      "unmatchedAction": "allow",
+      "rules": [
+        {"pattern": "https://a.test", "kind": "whitelist"}
+      ]
+    },
+    "unmatchedDenyNoWhitelist": {
+      "enabled": true,
+      "unmatchedAction": "deny",
+      "rules": [
+        {"pattern": "https://b.test", "kind": "blacklist"}
+      ]
+    },
+    "specificWhitelistWins": {
+      "enabled": true,
+      "rules": [
+        {"pattern": "https://example.com/deep", "kind": "whitelist"},
+        {"pattern": "https://example.com", "kind": "blacklist"}
+      ]
+    },
+    "specificBlacklistWins": {
+      "enabled": true,
+      "rules": [
+        {"pattern": "https://example.com", "kind": "whitelist"},
+        {"pattern": "https://example.com/ads", "kind": "blacklist"}
+      ]
+    },
+    "incomparableDefault": {
+      "enabled": true,
+      "conflictResolution": "blacklistWins",
+      "rules": [
+        {"pattern": "*://*.example.com", "kind": "whitelist"},
+        {"pattern": "*://ads.*", "kind": "blacklist"}
+      ]
+    },
+    "incomparableWhitelistWins": {
+      "enabled": true,
+      "conflictResolution": "whitelistWins",
+      "rules": [
+        {"pattern": "*://*.example.com", "kind": "whitelist"},
+        {"pattern": "*://ads.*", "kind": "blacklist"}
+      ]
+    },
+    "equalRules": {
+      "enabled": true,
+      "conflictResolution": "blacklistWins",
+      "rules": [
+        {"pattern": "https://a.test/x", "kind": "whitelist"},
+        {"pattern": "https://a.test/x", "kind": "blacklist"}
+      ]
+    },
+    "equalRulesWhitelistWins": {
+      "enabled": true,
+      "conflictResolution": "whitelistWins",
+      "rules": [
+        {"pattern": "https://a.test/x", "kind": "whitelist"},
+        {"pattern": "https://a.test/x", "kind": "blacklist"}
+      ]
+    },
+    "threeLevel": {
+      "enabled": true,
+      "rules": [
+        {"pattern": "https://a.test", "kind": "whitelist"},
+        {"pattern": "https://a.test/x/y", "kind": "whitelist"},
+        {"pattern": "https://a.test/x", "kind": "blacklist"}
+      ]
+    },
+    "wildcardPath": {
+      "enabled": true,
+      "rules": [
+        {"pattern": "*://*/ads/*", "kind": "blacklist"}
+      ]
+    },
+    "localFile": {
+      "enabled": true,
+      "rules": [
+        {"pattern": "file:///sdcard/pages/", "kind": "whitelist"},
+        {"pattern": "file:///sdcard/pages/ads/", "kind": "blacklist"}
+      ]
+    },
+    "strictBoundaryOn": {
+      "enabled": true,
+      "strictDomainBoundary": true,
+      "rules": [
+        {"pattern": "example.com", "kind": "blacklist"}
+      ]
+    },
+    "strictBoundaryOff": {
+      "enabled": true,
+      "strictDomainBoundary": false,
+      "rules": [
+        {"pattern": "example.com", "kind": "blacklist"}
+      ]
+    },
+    "disabledRule": {
+      "enabled": true,
+      "rules": [
+        {"pattern": "https://x.test", "kind": "blacklist", "enabled": false},
+        {"pattern": "https://y.test", "kind": "whitelist"}
+      ]
+    },
+    "masterOff": {
+      "enabled": false,
+      "rules": [
+        {"pattern": "https://x.test", "kind": "blacklist"}
+      ]
+    },
+    "schemeWidening": {
+      "enabled": true,
+      "rules": [
+        {"pattern": "*://example.com/path", "kind": "whitelist"},
+        {"pattern": "https://example.com/path/deep", "kind": "blacklist"}
+      ]
+    },
+    "noSuffixMatch": {
+      "enabled": true,
+      "rules": [
+        {"pattern": "https://school.test/lessons", "kind": "whitelist"}
+      ]
+    }
+  },
+  "cases": [
+    {"name": "prefix match on blacklisted directory", "config": "prefixBlacklist", "url": "https://example.com/ads/banner.png", "allowed": false, "reason": "blacklistOnly"},
+    {"name": "exact prefix boundary matches", "config": "prefixBlacklist", "url": "https://example.com/ads", "allowed": false, "reason": "blacklistOnly"},
+    {"name": "unrelated path allowed with empty whitelist", "config": "prefixBlacklist", "url": "https://example.com/article", "allowed": true, "reason": "unmatchedAllow"},
+    {"name": "different scheme does not match an https rule", "config": "prefixBlacklist", "url": "http://example.com/ads", "allowed": true, "reason": "unmatchedAllow"},
+    {"name": "a path rule requires the path to follow the host literally", "config": "prefixBlacklist", "url": "https://example.com.evil.test/ads/x", "allowed": true, "reason": "unmatchedAllow"},
+    {"name": "prefix semantics on a host rule also matches a longer host label (documented trade-off)", "config": "bareDomainBlacklist", "url": "https://ads.example.com.evil.test/x", "allowed": false, "reason": "blacklistOnly"},
+
+    {"name": "bare domain matches https", "config": "bareDomainBlacklist", "url": "https://ads.example.com/track", "allowed": false, "reason": "blacklistOnly"},
+    {"name": "bare domain matches http too", "config": "bareDomainBlacklist", "url": "http://ads.example.com/track", "allowed": false, "reason": "blacklistOnly"},
+    {"name": "bare domain is a prefix rule, not a substring rule", "config": "bareDomainBlacklist", "url": "https://cdn.example.com/x", "allowed": true, "reason": "unmatchedAllow"},
+
+    {"name": "authority is case insensitive", "config": "caseAndPort", "url": "https://example.com/Ads/1", "allowed": false, "reason": "blacklistOnly"},
+    {"name": "default port is normalised away", "config": "caseAndPort", "url": "https://example.com:443/Ads/1", "allowed": false, "reason": "blacklistOnly"},
+    {"name": "path stays case sensitive", "config": "caseAndPort", "url": "https://example.com/ads/1", "allowed": true, "reason": "unmatchedAllow"},
+
+    {"name": "whitelisted subtree allowed", "config": "whitelistMode", "url": "https://school.test/course/1", "allowed": true, "reason": "whitelistOnly"},
+    {"name": "non-listed site denied because a whitelist exists", "config": "whitelistMode", "url": "https://other.test/", "allowed": false, "reason": "unmatchedDeny"},
+
+    {"name": "explicit unmatched allow overrides whitelist mode", "config": "unmatchedAllowExplicit", "url": "https://b.test/", "allowed": true, "reason": "unmatchedAllow"},
+    {"name": "explicit unmatched deny with blacklist only", "config": "unmatchedDenyNoWhitelist", "url": "https://c.test/", "allowed": false, "reason": "unmatchedDeny"},
+
+    {"name": "more specific whitelist beats broader blacklist", "config": "specificWhitelistWins", "url": "https://example.com/deep/page", "allowed": true, "reason": "whitelistMoreSpecific"},
+    {"name": "sibling path still hits only the blacklist", "config": "specificWhitelistWins", "url": "https://example.com/other", "allowed": false, "reason": "blacklistOnly"},
+
+    {"name": "more specific blacklist beats broader whitelist", "config": "specificBlacklistWins", "url": "https://example.com/ads/x", "allowed": false, "reason": "blacklistMoreSpecific"},
+    {"name": "rest of the whitelisted host still allowed", "config": "specificBlacklistWins", "url": "https://example.com/news", "allowed": true, "reason": "whitelistOnly"},
+
+    {"name": "incomparable overlap resolves to blacklist by default", "config": "incomparableDefault", "url": "https://ads.example.com/x", "allowed": false, "reason": "conflictBlacklistWins"},
+    {"name": "incomparable overlap resolves to whitelist when configured", "config": "incomparableWhitelistWins", "url": "https://ads.example.com/x", "allowed": true, "reason": "conflictWhitelistWins"},
+
+    {"name": "identical rules are not strictly more specific, blacklist wins", "config": "equalRules", "url": "https://a.test/x/1", "allowed": false, "reason": "conflictBlacklistWins"},
+    {"name": "identical rules with whitelist-priority conflict mode", "config": "equalRulesWhitelistWins", "url": "https://a.test/x/1", "allowed": true, "reason": "conflictWhitelistWins"},
+
+    {"name": "deepest matching whitelist decides over mid-level blacklist", "config": "threeLevel", "url": "https://a.test/x/y/z", "allowed": true, "reason": "whitelistMoreSpecific"},
+    {"name": "mid-level blacklist decides where the deep whitelist does not match", "config": "threeLevel", "url": "https://a.test/x/z", "allowed": false, "reason": "blacklistMoreSpecific"},
+
+    {"name": "wildcard path blacklist", "config": "wildcardPath", "url": "https://any.test/ads/banner", "allowed": false, "reason": "blacklistOnly"},
+    {"name": "wildcard path blacklist does not leak", "config": "wildcardPath", "url": "https://any.test/content", "allowed": true, "reason": "unmatchedAllow"},
+
+    {"name": "local file inside whitelisted directory", "config": "localFile", "url": "file:///sdcard/pages/index.html", "allowed": true, "reason": "whitelistOnly"},
+    {"name": "local file inside more specific blacklisted subdirectory", "config": "localFile", "url": "file:///sdcard/pages/ads/a.html", "allowed": false, "reason": "blacklistMoreSpecific"},
+    {"name": "local file outside the whitelist is denied", "config": "localFile", "url": "file:///sdcard/other.html", "allowed": false, "reason": "unmatchedDeny"},
+
+    {"name": "strict boundary still matches the host itself", "config": "strictBoundaryOn", "url": "https://example.com", "allowed": false, "reason": "blacklistOnly"},
+    {"name": "strict boundary matches a path", "config": "strictBoundaryOn", "url": "https://example.com/x", "allowed": false, "reason": "blacklistOnly"},
+    {"name": "strict boundary matches an explicit port", "config": "strictBoundaryOn", "url": "https://example.com:8443/x", "allowed": false, "reason": "blacklistOnly"},
+    {"name": "strict boundary refuses a host merely starting with the entry", "config": "strictBoundaryOn", "url": "https://example.com.evil.test/x", "allowed": true, "reason": "unmatchedAllow"},
+    {"name": "plain prefix mode does match a host merely starting with the entry", "config": "strictBoundaryOff", "url": "https://example.com.evil.test/x", "allowed": false, "reason": "blacklistOnly"},
+
+    {"name": "disabled blacklist rule does not match", "config": "disabledRule", "url": "https://x.test/", "allowed": false, "reason": "unmatchedDeny"},
+    {"name": "enabled whitelist rule still matches", "config": "disabledRule", "url": "https://y.test/", "allowed": true, "reason": "whitelistOnly"},
+
+    {"name": "master switch off allows everything", "config": "masterOff", "url": "https://x.test/", "allowed": true, "reason": "policyDisabled"},
+
+    {"name": "scheme wildcard whitelist matches http", "config": "schemeWidening", "url": "http://example.com/path/deep/x", "allowed": true, "reason": "whitelistOnly"},
+    {"name": "https deeper blacklist is more specific than the scheme-wildcard whitelist", "config": "schemeWidening", "url": "https://example.com/path/deep/x", "allowed": false, "reason": "blacklistMoreSpecific"},
+
+    {"name": "whitelist prefix does not match a subdomain", "config": "noSuffixMatch", "url": "https://sub.school.test/lessons/1", "allowed": false, "reason": "unmatchedDeny"},
+    {"name": "whitelist prefix matches its own host", "config": "noSuffixMatch", "url": "https://school.test/lessons/1", "allowed": true, "reason": "whitelistOnly"}
+  ],
+  "relations": [
+    {"a": "https://example.com/x", "b": "https://example.com", "subset": true, "why": "deeper path is a subset of the host"},
+    {"a": "https://example.com", "b": "https://example.com/x", "subset": false, "why": "the host is not a subset of one of its paths"},
+    {"a": "https://example.com/x", "b": "https://example.com/x", "subset": true, "why": "identical rules contain each other"},
+    {"a": "https://a.test", "b": "*://a.test", "subset": true, "why": "https is a subset of any-scheme"},
+    {"a": "*://a.test", "b": "https://a.test", "subset": false, "why": "any-scheme is not a subset of https"},
+    {"a": "*://*.example.com", "b": "*://example.com", "subset": false, "why": "a subdomain rule is not contained in the apex rule"},
+    {"a": "*://example.com", "b": "*://*.example.com", "subset": false, "why": "the apex rule is not contained in a subdomain rule"},
+    {"a": "*://*.example.com", "b": "*://*.example.com/", "subset": false, "why": "the bare host form is not covered by the slash form"},
+    {"a": "*://x.test/a/b", "b": "*://x.test/a", "subset": true, "why": "deeper path segment"},
+    {"a": "*://x.test/*/b", "b": "*://x.test/*", "subset": true, "why": "wildcard middle still under a wildcard"},
+    {"a": "*://x.test/*", "b": "*://x.test/*/b", "subset": false, "why": "wildcard middle is not restricted to the b suffix"},
+    {"a": "*://a.test/x*", "b": "*://a.test/x", "subset": true, "why": "trailing star is implied by prefix semantics, so these are equivalent"},
+    {"a": "*://a.test/x", "b": "*://a.test/x*", "subset": true, "why": "the other direction of the same equivalence"},
+    {"a": "*://*.a.test", "b": "*://x.*", "subset": false, "why": "genuinely incomparable wildcard sets"},
+    {"a": "*://x.*", "b": "*://*.a.test", "subset": false, "why": "genuinely incomparable wildcard sets"},
+    {"a": "*://a.test/*/x", "b": "*://a.test/*/y", "subset": false, "why": "disjoint suffix constraints"},
+    {"a": "*://a.test/x/y/z", "b": "*://a.test", "subset": true, "why": "three levels deep under a host"},
+    {"a": "*://a.test/ads/banner", "b": "*://*/ads/*", "subset": true, "why": "concrete instance under a wildcard-host path rule"},
+    {"a": "*://*/ads/*", "b": "*://a.test/ads/banner", "subset": false, "why": "wildcard host is not contained in one concrete host"}
+  ]
+}

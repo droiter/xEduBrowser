@@ -1,0 +1,4118 @@
+{
+ "generatedBy": "Dart policy engine (lib/policy) - cross-check fixture for the Kotlin port",
+ "configs": {
+  "wildcardHosts": {
+   "enabled": true,
+   "rules": [
+    {
+     "pattern": "*://*.example.com",
+     "kind": "whitelist"
+    },
+    {
+     "pattern": "*://ads.*",
+     "kind": "blacklist"
+    },
+    {
+     "pattern": "*://*.example.com/safe",
+     "kind": "whitelist"
+    }
+   ]
+  },
+  "wildcardPathNest": {
+   "enabled": true,
+   "rules": [
+    {
+     "pattern": "*://*/ads/*",
+     "kind": "blacklist"
+    },
+    {
+     "pattern": "*://a.test/ads/banner",
+     "kind": "whitelist"
+    },
+    {
+     "pattern": "*://a.test/ads",
+     "kind": "whitelist"
+    }
+   ]
+  },
+  "strictSubdomain": {
+   "enabled": true,
+   "strictDomainBoundary": true,
+   "rules": [
+    {
+     "pattern": "*.example.com",
+     "kind": "blacklist"
+    },
+    {
+     "pattern": "safe.example.com",
+     "kind": "whitelist"
+    }
+   ]
+  },
+  "strictWithPort": {
+   "enabled": true,
+   "strictDomainBoundary": true,
+   "rules": [
+    {
+     "pattern": "example.com:8443",
+     "kind": "blacklist"
+    },
+    {
+     "pattern": "example.com",
+     "kind": "whitelist"
+    }
+   ]
+  },
+  "queryRules": {
+   "enabled": true,
+   "rules": [
+    {
+     "pattern": "*://a.test/x?y",
+     "kind": "blacklist"
+    },
+    {
+     "pattern": "*://a.test/x",
+     "kind": "whitelist"
+    },
+    {
+     "pattern": "*://a.test/x/y",
+     "kind": "whitelist"
+    }
+   ]
+  },
+  "escapedGlob": {
+   "enabled": true,
+   "rules": [
+    {
+     "pattern": "*://a.test/a\\*b",
+     "kind": "blacklist"
+    },
+    {
+     "pattern": "*://a.test/ab",
+     "kind": "blacklist"
+    }
+   ]
+  },
+  "fileNest": {
+   "enabled": true,
+   "rules": [
+    {
+     "pattern": "/sdcard/site/",
+     "kind": "whitelist"
+    },
+    {
+     "pattern": "/sdcard/site/games/",
+     "kind": "blacklist"
+    },
+    {
+     "pattern": "/sdcard/site/games/allowed.html",
+     "kind": "whitelist"
+    }
+   ]
+  },
+  "emptyRulesDeny": {
+   "enabled": true,
+   "unmatchedAction": "deny",
+   "rules": []
+  },
+  "disabledAll": {
+   "enabled": true,
+   "rules": [
+    {
+     "pattern": "https://x.test",
+     "kind": "blacklist",
+     "enabled": false
+    },
+    {
+     "pattern": "https://y.test",
+     "kind": "whitelist",
+     "enabled": false
+    }
+   ]
+  },
+  "trailingStar": {
+   "enabled": true,
+   "rules": [
+    {
+     "pattern": "https://a.test/*",
+     "kind": "whitelist"
+    },
+    {
+     "pattern": "https://a.test/*/private",
+     "kind": "blacklist"
+    }
+   ]
+  },
+  "schemeMix": {
+   "enabled": true,
+   "rules": [
+    {
+     "pattern": "http://a.test",
+     "kind": "whitelist"
+    },
+    {
+     "pattern": "https://a.test",
+     "kind": "blacklist"
+    }
+   ]
+  },
+  "deepPaths": {
+   "enabled": true,
+   "rules": [
+    {
+     "pattern": "https://a.test/x/y/z",
+     "kind": "whitelist"
+    },
+    {
+     "pattern": "https://a.test/x",
+     "kind": "blacklist"
+    }
+   ]
+  },
+  "whitelistWinsMode": {
+   "enabled": true,
+   "conflictResolution": "whitelistWins",
+   "rules": [
+    {
+     "pattern": "*://a.*",
+     "kind": "whitelist"
+    },
+    {
+     "pattern": "*://*.test",
+     "kind": "blacklist"
+    }
+   ]
+  },
+  "caseSensitivity": {
+   "enabled": true,
+   "rules": [
+    {
+     "pattern": "HTTPS://A.Test/Path",
+     "kind": "blacklist"
+    }
+   ]
+  }
+ },
+ "cases": [
+  {
+   "config": "wildcardHosts",
+   "url": "https://ads.example.com/x",
+   "allowed": false,
+   "reason": "conflictBlacklistWins",
+   "normalizedUrl": "https://ads.example.com/x"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://safe.example.com/x",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://safe.example.com/x"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://shop.example.com/safe/page",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://shop.example.com/safe/page"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://shop.example.com/safe",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://shop.example.com/safe"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://example.com/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com/"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "http://ads.other.test/y",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "http://ads.other.test/y"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://a.test/ads/banner",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ads/banner"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://a.test/ads/other",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ads/other"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://b.test/ads/banner",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://b.test/ads/banner"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://a.test/ads",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ads"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://safe.example.com:8443/x",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://safe.example.com:8443/x"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com:8443/x"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://sub.example.com:8443/x",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://sub.example.com:8443/x"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com/x"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://a.test/x?y=1",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x?y=1"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://a.test/x/y/z",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/y/z"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://a.test/x/y",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/y"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://a.test/x/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://a.test/a*b",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/a*b"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://a.test/ab",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ab"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://a.test/aXb",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/aXb"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "file:///sdcard/site/index.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/index.html"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "file:///sdcard/site/games/game.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/games/game.html"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "file:///sdcard/site/games/allowed.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/games/allowed.html"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "file:///sdcard/other.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/other.html"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://x.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://x.test/"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://y.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://y.test/"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://a.test/anything",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://a.test/anything/private",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything/private"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://a.test/anything/public",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything/public"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "http://a.test/p",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "http://a.test/p"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://a.test/p",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/p"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://a.test/x/y/z/w",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/y/z/w"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://a.test/x/z",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/z"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://b.test/x/y/z",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://b.test/x/y/z"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://a.test/path",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/path"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://A.Test/Path/deep",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/Path/deep"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://a.test/path/deep",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/path/deep"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://sub.a.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://sub.a.test/"
+  },
+  {
+   "config": "wildcardHosts",
+   "url": "https://a.example.com/",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.example.com/"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://ads.example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://ads.example.com/x"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://safe.example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://safe.example.com/x"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://shop.example.com/safe/page",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://shop.example.com/safe/page"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://shop.example.com/safe",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://shop.example.com/safe"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://example.com/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com/"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "http://ads.other.test/y",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "http://ads.other.test/y"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://a.test/ads/banner",
+   "allowed": true,
+   "reason": "whitelistMoreSpecific",
+   "normalizedUrl": "https://a.test/ads/banner"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://a.test/ads/other",
+   "allowed": false,
+   "reason": "conflictBlacklistWins",
+   "normalizedUrl": "https://a.test/ads/other"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://b.test/ads/banner",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://b.test/ads/banner"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://a.test/ads",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.test/ads"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://safe.example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://safe.example.com:8443/x"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com:8443/x"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://sub.example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://sub.example.com:8443/x"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com/x"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://a.test/x?y=1",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x?y=1"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://a.test/x/y/z",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/y/z"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://a.test/x/y",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/y"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://a.test/x/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://a.test/a*b",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/a*b"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://a.test/ab",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ab"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://a.test/aXb",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/aXb"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "file:///sdcard/site/index.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/index.html"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "file:///sdcard/site/games/game.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/games/game.html"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "file:///sdcard/site/games/allowed.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/games/allowed.html"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "file:///sdcard/other.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/other.html"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://x.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://x.test/"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://y.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://y.test/"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://a.test/anything",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://a.test/anything/private",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything/private"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://a.test/anything/public",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything/public"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "http://a.test/p",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "http://a.test/p"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://a.test/p",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/p"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://a.test/x/y/z/w",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/y/z/w"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://a.test/x/z",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/z"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://b.test/x/y/z",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://b.test/x/y/z"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://a.test/path",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/path"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://A.Test/Path/deep",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/Path/deep"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://a.test/path/deep",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/path/deep"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://sub.a.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://sub.a.test/"
+  },
+  {
+   "config": "wildcardPathNest",
+   "url": "https://a.example.com/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.example.com/"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://ads.example.com/x",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://ads.example.com/x"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://safe.example.com/x",
+   "allowed": true,
+   "reason": "whitelistMoreSpecific",
+   "normalizedUrl": "https://safe.example.com/x"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://shop.example.com/safe/page",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://shop.example.com/safe/page"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://shop.example.com/safe",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://shop.example.com/safe"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://example.com/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com/"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "http://ads.other.test/y",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "http://ads.other.test/y"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://a.test/ads/banner",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ads/banner"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://a.test/ads/other",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ads/other"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://b.test/ads/banner",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://b.test/ads/banner"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://a.test/ads",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ads"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://safe.example.com:8443/x",
+   "allowed": true,
+   "reason": "whitelistMoreSpecific",
+   "normalizedUrl": "https://safe.example.com:8443/x"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com:8443/x"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://sub.example.com:8443/x",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://sub.example.com:8443/x"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com/x"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://a.test/x?y=1",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x?y=1"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://a.test/x/y/z",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/y/z"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://a.test/x/y",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/y"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://a.test/x/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://a.test/a*b",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/a*b"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://a.test/ab",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ab"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://a.test/aXb",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/aXb"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "file:///sdcard/site/index.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/index.html"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "file:///sdcard/site/games/game.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/games/game.html"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "file:///sdcard/site/games/allowed.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/games/allowed.html"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "file:///sdcard/other.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/other.html"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://x.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://x.test/"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://y.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://y.test/"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://a.test/anything",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://a.test/anything/private",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything/private"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://a.test/anything/public",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything/public"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "http://a.test/p",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "http://a.test/p"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://a.test/p",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/p"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://a.test/x/y/z/w",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/y/z/w"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://a.test/x/z",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/z"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://b.test/x/y/z",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://b.test/x/y/z"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://a.test/path",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/path"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://A.Test/Path/deep",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/Path/deep"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://a.test/path/deep",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/path/deep"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://sub.a.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://sub.a.test/"
+  },
+  {
+   "config": "strictSubdomain",
+   "url": "https://a.example.com/",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.example.com/"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://ads.example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://ads.example.com/x"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://safe.example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://safe.example.com/x"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://shop.example.com/safe/page",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://shop.example.com/safe/page"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://shop.example.com/safe",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://shop.example.com/safe"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://example.com/",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://example.com/"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "http://ads.other.test/y",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "http://ads.other.test/y"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://a.test/ads/banner",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ads/banner"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://a.test/ads/other",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ads/other"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://b.test/ads/banner",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://b.test/ads/banner"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://a.test/ads",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ads"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://safe.example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://safe.example.com:8443/x"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://example.com:8443/x",
+   "allowed": false,
+   "reason": "blacklistMoreSpecific",
+   "normalizedUrl": "https://example.com:8443/x"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://sub.example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://sub.example.com:8443/x"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://example.com/x",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://example.com/x"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://a.test/x?y=1",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x?y=1"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://a.test/x/y/z",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/y/z"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://a.test/x/y",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/y"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://a.test/x/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://a.test/a*b",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/a*b"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://a.test/ab",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ab"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://a.test/aXb",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/aXb"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "file:///sdcard/site/index.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/index.html"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "file:///sdcard/site/games/game.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/games/game.html"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "file:///sdcard/site/games/allowed.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/games/allowed.html"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "file:///sdcard/other.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/other.html"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://x.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://x.test/"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://y.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://y.test/"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://a.test/anything",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://a.test/anything/private",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything/private"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://a.test/anything/public",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything/public"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "http://a.test/p",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "http://a.test/p"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://a.test/p",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/p"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://a.test/x/y/z/w",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/y/z/w"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://a.test/x/z",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/z"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://b.test/x/y/z",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://b.test/x/y/z"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://a.test/path",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/path"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://A.Test/Path/deep",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/Path/deep"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://a.test/path/deep",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/path/deep"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://sub.a.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://sub.a.test/"
+  },
+  {
+   "config": "strictWithPort",
+   "url": "https://a.example.com/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.example.com/"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://ads.example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://ads.example.com/x"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://safe.example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://safe.example.com/x"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://shop.example.com/safe/page",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://shop.example.com/safe/page"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://shop.example.com/safe",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://shop.example.com/safe"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://example.com/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com/"
+  },
+  {
+   "config": "queryRules",
+   "url": "http://ads.other.test/y",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "http://ads.other.test/y"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://a.test/ads/banner",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ads/banner"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://a.test/ads/other",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ads/other"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://b.test/ads/banner",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://b.test/ads/banner"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://a.test/ads",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ads"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://safe.example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://safe.example.com:8443/x"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com:8443/x"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://sub.example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://sub.example.com:8443/x"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com/x"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://a.test/x?y=1",
+   "allowed": false,
+   "reason": "blacklistMoreSpecific",
+   "normalizedUrl": "https://a.test/x?y=1"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://a.test/x/y/z",
+   "allowed": true,
+   "reason": "whitelistMoreSpecific",
+   "normalizedUrl": "https://a.test/x/y/z"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://a.test/x/y",
+   "allowed": true,
+   "reason": "whitelistMoreSpecific",
+   "normalizedUrl": "https://a.test/x/y"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://a.test/x/",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.test/x/"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://a.test/a*b",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/a*b"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://a.test/ab",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ab"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://a.test/aXb",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/aXb"
+  },
+  {
+   "config": "queryRules",
+   "url": "file:///sdcard/site/index.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/index.html"
+  },
+  {
+   "config": "queryRules",
+   "url": "file:///sdcard/site/games/game.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/games/game.html"
+  },
+  {
+   "config": "queryRules",
+   "url": "file:///sdcard/site/games/allowed.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/games/allowed.html"
+  },
+  {
+   "config": "queryRules",
+   "url": "file:///sdcard/other.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/other.html"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://x.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://x.test/"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://y.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://y.test/"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://a.test/anything",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://a.test/anything/private",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything/private"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://a.test/anything/public",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything/public"
+  },
+  {
+   "config": "queryRules",
+   "url": "http://a.test/p",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "http://a.test/p"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://a.test/p",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/p"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://a.test/x/y/z/w",
+   "allowed": true,
+   "reason": "whitelistMoreSpecific",
+   "normalizedUrl": "https://a.test/x/y/z/w"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://a.test/x/z",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.test/x/z"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://b.test/x/y/z",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://b.test/x/y/z"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://a.test/path",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/path"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://A.Test/Path/deep",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/Path/deep"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://a.test/path/deep",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/path/deep"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://sub.a.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://sub.a.test/"
+  },
+  {
+   "config": "queryRules",
+   "url": "https://a.example.com/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.example.com/"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://ads.example.com/x",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://ads.example.com/x"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://safe.example.com/x",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://safe.example.com/x"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://shop.example.com/safe/page",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://shop.example.com/safe/page"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://shop.example.com/safe",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://shop.example.com/safe"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://example.com/",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://example.com/"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "http://ads.other.test/y",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "http://ads.other.test/y"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://a.test/ads/banner",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/ads/banner"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://a.test/ads/other",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/ads/other"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://b.test/ads/banner",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://b.test/ads/banner"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://a.test/ads",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/ads"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://safe.example.com:8443/x",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://safe.example.com:8443/x"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://example.com:8443/x",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://example.com:8443/x"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://sub.example.com:8443/x",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://sub.example.com:8443/x"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://example.com/x",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://example.com/x"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://a.test/x?y=1",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/x?y=1"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://a.test/x/y/z",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/x/y/z"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://a.test/x/y",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/x/y"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://a.test/x/",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/x/"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://a.test/a*b",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/a*b"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://a.test/ab",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/ab"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://a.test/aXb",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/aXb"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "file:///sdcard/site/index.html",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "file:///sdcard/site/index.html"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "file:///sdcard/site/games/game.html",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "file:///sdcard/site/games/game.html"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "file:///sdcard/site/games/allowed.html",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "file:///sdcard/site/games/allowed.html"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "file:///sdcard/other.html",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "file:///sdcard/other.html"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://x.test/",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://x.test/"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://y.test/",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://y.test/"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://a.test/anything",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/anything"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://a.test/anything/private",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/anything/private"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://a.test/anything/public",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/anything/public"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "http://a.test/p",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "http://a.test/p"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://a.test/p",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/p"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://a.test/x/y/z/w",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/x/y/z/w"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://a.test/x/z",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/x/z"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://b.test/x/y/z",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://b.test/x/y/z"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://a.test/path",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/path"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://A.Test/Path/deep",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/Path/deep"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://a.test/path/deep",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/path/deep"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://sub.a.test/",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://sub.a.test/"
+  },
+  {
+   "config": "escapedGlob",
+   "url": "https://a.example.com/",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.example.com/"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://ads.example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://ads.example.com/x"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://safe.example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://safe.example.com/x"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://shop.example.com/safe/page",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://shop.example.com/safe/page"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://shop.example.com/safe",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://shop.example.com/safe"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://example.com/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com/"
+  },
+  {
+   "config": "fileNest",
+   "url": "http://ads.other.test/y",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "http://ads.other.test/y"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://a.test/ads/banner",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ads/banner"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://a.test/ads/other",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ads/other"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://b.test/ads/banner",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://b.test/ads/banner"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://a.test/ads",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ads"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://safe.example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://safe.example.com:8443/x"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com:8443/x"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://sub.example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://sub.example.com:8443/x"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com/x"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://a.test/x?y=1",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x?y=1"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://a.test/x/y/z",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/y/z"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://a.test/x/y",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/y"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://a.test/x/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://a.test/a*b",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/a*b"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://a.test/ab",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ab"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://a.test/aXb",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/aXb"
+  },
+  {
+   "config": "fileNest",
+   "url": "file:///sdcard/site/index.html",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "file:///sdcard/site/index.html"
+  },
+  {
+   "config": "fileNest",
+   "url": "file:///sdcard/site/games/game.html",
+   "allowed": false,
+   "reason": "blacklistMoreSpecific",
+   "normalizedUrl": "file:///sdcard/site/games/game.html"
+  },
+  {
+   "config": "fileNest",
+   "url": "file:///sdcard/site/games/allowed.html",
+   "allowed": true,
+   "reason": "whitelistMoreSpecific",
+   "normalizedUrl": "file:///sdcard/site/games/allowed.html"
+  },
+  {
+   "config": "fileNest",
+   "url": "file:///sdcard/other.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/other.html"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://x.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://x.test/"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://y.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://y.test/"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://a.test/anything",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://a.test/anything/private",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything/private"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://a.test/anything/public",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything/public"
+  },
+  {
+   "config": "fileNest",
+   "url": "http://a.test/p",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "http://a.test/p"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://a.test/p",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/p"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://a.test/x/y/z/w",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/y/z/w"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://a.test/x/z",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/z"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://b.test/x/y/z",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://b.test/x/y/z"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://a.test/path",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/path"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://A.Test/Path/deep",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/Path/deep"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://a.test/path/deep",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/path/deep"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://sub.a.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://sub.a.test/"
+  },
+  {
+   "config": "fileNest",
+   "url": "https://a.example.com/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.example.com/"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://ads.example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://ads.example.com/x"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://safe.example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://safe.example.com/x"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://shop.example.com/safe/page",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://shop.example.com/safe/page"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://shop.example.com/safe",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://shop.example.com/safe"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://example.com/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com/"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "http://ads.other.test/y",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "http://ads.other.test/y"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://a.test/ads/banner",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ads/banner"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://a.test/ads/other",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ads/other"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://b.test/ads/banner",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://b.test/ads/banner"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://a.test/ads",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ads"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://safe.example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://safe.example.com:8443/x"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com:8443/x"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://sub.example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://sub.example.com:8443/x"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com/x"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://a.test/x?y=1",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x?y=1"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://a.test/x/y/z",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/y/z"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://a.test/x/y",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/y"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://a.test/x/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://a.test/a*b",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/a*b"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://a.test/ab",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ab"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://a.test/aXb",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/aXb"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "file:///sdcard/site/index.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/index.html"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "file:///sdcard/site/games/game.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/games/game.html"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "file:///sdcard/site/games/allowed.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/games/allowed.html"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "file:///sdcard/other.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/other.html"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://x.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://x.test/"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://y.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://y.test/"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://a.test/anything",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://a.test/anything/private",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything/private"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://a.test/anything/public",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything/public"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "http://a.test/p",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "http://a.test/p"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://a.test/p",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/p"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://a.test/x/y/z/w",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/y/z/w"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://a.test/x/z",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/x/z"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://b.test/x/y/z",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://b.test/x/y/z"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://a.test/path",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/path"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://A.Test/Path/deep",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/Path/deep"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://a.test/path/deep",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/path/deep"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://sub.a.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://sub.a.test/"
+  },
+  {
+   "config": "emptyRulesDeny",
+   "url": "https://a.example.com/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.example.com/"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://ads.example.com/x",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://ads.example.com/x"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://safe.example.com/x",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://safe.example.com/x"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://shop.example.com/safe/page",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://shop.example.com/safe/page"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://shop.example.com/safe",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://shop.example.com/safe"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://example.com/",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://example.com/"
+  },
+  {
+   "config": "disabledAll",
+   "url": "http://ads.other.test/y",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "http://ads.other.test/y"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://a.test/ads/banner",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/ads/banner"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://a.test/ads/other",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/ads/other"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://b.test/ads/banner",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://b.test/ads/banner"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://a.test/ads",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/ads"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://safe.example.com:8443/x",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://safe.example.com:8443/x"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://example.com:8443/x",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://example.com:8443/x"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://sub.example.com:8443/x",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://sub.example.com:8443/x"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://example.com/x",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://example.com/x"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://a.test/x?y=1",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/x?y=1"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://a.test/x/y/z",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/x/y/z"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://a.test/x/y",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/x/y"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://a.test/x/",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/x/"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://a.test/a*b",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/a*b"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://a.test/ab",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/ab"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://a.test/aXb",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/aXb"
+  },
+  {
+   "config": "disabledAll",
+   "url": "file:///sdcard/site/index.html",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "file:///sdcard/site/index.html"
+  },
+  {
+   "config": "disabledAll",
+   "url": "file:///sdcard/site/games/game.html",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "file:///sdcard/site/games/game.html"
+  },
+  {
+   "config": "disabledAll",
+   "url": "file:///sdcard/site/games/allowed.html",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "file:///sdcard/site/games/allowed.html"
+  },
+  {
+   "config": "disabledAll",
+   "url": "file:///sdcard/other.html",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "file:///sdcard/other.html"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://x.test/",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://x.test/"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://y.test/",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://y.test/"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://a.test/anything",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/anything"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://a.test/anything/private",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/anything/private"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://a.test/anything/public",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/anything/public"
+  },
+  {
+   "config": "disabledAll",
+   "url": "http://a.test/p",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "http://a.test/p"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://a.test/p",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/p"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://a.test/x/y/z/w",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/x/y/z/w"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://a.test/x/z",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/x/z"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://b.test/x/y/z",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://b.test/x/y/z"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://a.test/path",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/path"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://A.Test/Path/deep",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/Path/deep"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://a.test/path/deep",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/path/deep"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://sub.a.test/",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://sub.a.test/"
+  },
+  {
+   "config": "disabledAll",
+   "url": "https://a.example.com/",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.example.com/"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://ads.example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://ads.example.com/x"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://safe.example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://safe.example.com/x"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://shop.example.com/safe/page",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://shop.example.com/safe/page"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://shop.example.com/safe",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://shop.example.com/safe"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://example.com/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com/"
+  },
+  {
+   "config": "trailingStar",
+   "url": "http://ads.other.test/y",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "http://ads.other.test/y"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://a.test/ads/banner",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.test/ads/banner"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://a.test/ads/other",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.test/ads/other"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://b.test/ads/banner",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://b.test/ads/banner"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://a.test/ads",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.test/ads"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://safe.example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://safe.example.com:8443/x"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com:8443/x"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://sub.example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://sub.example.com:8443/x"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com/x"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://a.test/x?y=1",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.test/x?y=1"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://a.test/x/y/z",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.test/x/y/z"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://a.test/x/y",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.test/x/y"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://a.test/x/",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.test/x/"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://a.test/a*b",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.test/a*b"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://a.test/ab",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.test/ab"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://a.test/aXb",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.test/aXb"
+  },
+  {
+   "config": "trailingStar",
+   "url": "file:///sdcard/site/index.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/index.html"
+  },
+  {
+   "config": "trailingStar",
+   "url": "file:///sdcard/site/games/game.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/games/game.html"
+  },
+  {
+   "config": "trailingStar",
+   "url": "file:///sdcard/site/games/allowed.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/games/allowed.html"
+  },
+  {
+   "config": "trailingStar",
+   "url": "file:///sdcard/other.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/other.html"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://x.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://x.test/"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://y.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://y.test/"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://a.test/anything",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.test/anything"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://a.test/anything/private",
+   "allowed": false,
+   "reason": "blacklistMoreSpecific",
+   "normalizedUrl": "https://a.test/anything/private"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://a.test/anything/public",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.test/anything/public"
+  },
+  {
+   "config": "trailingStar",
+   "url": "http://a.test/p",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "http://a.test/p"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://a.test/p",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.test/p"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://a.test/x/y/z/w",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.test/x/y/z/w"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://a.test/x/z",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.test/x/z"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://b.test/x/y/z",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://b.test/x/y/z"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://a.test/path",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.test/path"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://A.Test/Path/deep",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.test/Path/deep"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://a.test/path/deep",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.test/path/deep"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://sub.a.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://sub.a.test/"
+  },
+  {
+   "config": "trailingStar",
+   "url": "https://a.example.com/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.example.com/"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://ads.example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://ads.example.com/x"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://safe.example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://safe.example.com/x"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://shop.example.com/safe/page",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://shop.example.com/safe/page"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://shop.example.com/safe",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://shop.example.com/safe"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://example.com/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com/"
+  },
+  {
+   "config": "schemeMix",
+   "url": "http://ads.other.test/y",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "http://ads.other.test/y"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://a.test/ads/banner",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/ads/banner"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://a.test/ads/other",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/ads/other"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://b.test/ads/banner",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://b.test/ads/banner"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://a.test/ads",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/ads"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://safe.example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://safe.example.com:8443/x"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com:8443/x"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://sub.example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://sub.example.com:8443/x"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com/x"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://a.test/x?y=1",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/x?y=1"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://a.test/x/y/z",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/x/y/z"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://a.test/x/y",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/x/y"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://a.test/x/",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/x/"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://a.test/a*b",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/a*b"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://a.test/ab",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/ab"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://a.test/aXb",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/aXb"
+  },
+  {
+   "config": "schemeMix",
+   "url": "file:///sdcard/site/index.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/index.html"
+  },
+  {
+   "config": "schemeMix",
+   "url": "file:///sdcard/site/games/game.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/games/game.html"
+  },
+  {
+   "config": "schemeMix",
+   "url": "file:///sdcard/site/games/allowed.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/games/allowed.html"
+  },
+  {
+   "config": "schemeMix",
+   "url": "file:///sdcard/other.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/other.html"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://x.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://x.test/"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://y.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://y.test/"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://a.test/anything",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/anything"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://a.test/anything/private",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/anything/private"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://a.test/anything/public",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/anything/public"
+  },
+  {
+   "config": "schemeMix",
+   "url": "http://a.test/p",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "http://a.test/p"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://a.test/p",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/p"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://a.test/x/y/z/w",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/x/y/z/w"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://a.test/x/z",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/x/z"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://b.test/x/y/z",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://b.test/x/y/z"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://a.test/path",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/path"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://A.Test/Path/deep",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/Path/deep"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://a.test/path/deep",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/path/deep"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://sub.a.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://sub.a.test/"
+  },
+  {
+   "config": "schemeMix",
+   "url": "https://a.example.com/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.example.com/"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://ads.example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://ads.example.com/x"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://safe.example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://safe.example.com/x"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://shop.example.com/safe/page",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://shop.example.com/safe/page"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://shop.example.com/safe",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://shop.example.com/safe"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://example.com/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com/"
+  },
+  {
+   "config": "deepPaths",
+   "url": "http://ads.other.test/y",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "http://ads.other.test/y"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://a.test/ads/banner",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ads/banner"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://a.test/ads/other",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ads/other"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://b.test/ads/banner",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://b.test/ads/banner"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://a.test/ads",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ads"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://safe.example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://safe.example.com:8443/x"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com:8443/x"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://sub.example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://sub.example.com:8443/x"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com/x"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://a.test/x?y=1",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/x?y=1"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://a.test/x/y/z",
+   "allowed": true,
+   "reason": "whitelistMoreSpecific",
+   "normalizedUrl": "https://a.test/x/y/z"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://a.test/x/y",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/x/y"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://a.test/x/",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/x/"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://a.test/a*b",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/a*b"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://a.test/ab",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/ab"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://a.test/aXb",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/aXb"
+  },
+  {
+   "config": "deepPaths",
+   "url": "file:///sdcard/site/index.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/index.html"
+  },
+  {
+   "config": "deepPaths",
+   "url": "file:///sdcard/site/games/game.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/games/game.html"
+  },
+  {
+   "config": "deepPaths",
+   "url": "file:///sdcard/site/games/allowed.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/games/allowed.html"
+  },
+  {
+   "config": "deepPaths",
+   "url": "file:///sdcard/other.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/other.html"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://x.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://x.test/"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://y.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://y.test/"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://a.test/anything",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://a.test/anything/private",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything/private"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://a.test/anything/public",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/anything/public"
+  },
+  {
+   "config": "deepPaths",
+   "url": "http://a.test/p",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "http://a.test/p"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://a.test/p",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/p"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://a.test/x/y/z/w",
+   "allowed": true,
+   "reason": "whitelistMoreSpecific",
+   "normalizedUrl": "https://a.test/x/y/z/w"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://a.test/x/z",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/x/z"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://b.test/x/y/z",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://b.test/x/y/z"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://a.test/path",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/path"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://A.Test/Path/deep",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/Path/deep"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://a.test/path/deep",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.test/path/deep"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://sub.a.test/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://sub.a.test/"
+  },
+  {
+   "config": "deepPaths",
+   "url": "https://a.example.com/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://a.example.com/"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://ads.example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://ads.example.com/x"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://safe.example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://safe.example.com/x"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://shop.example.com/safe/page",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://shop.example.com/safe/page"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://shop.example.com/safe",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://shop.example.com/safe"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://example.com/",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com/"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "http://ads.other.test/y",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "http://ads.other.test/y"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://a.test/ads/banner",
+   "allowed": true,
+   "reason": "conflictWhitelistWins",
+   "normalizedUrl": "https://a.test/ads/banner"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://a.test/ads/other",
+   "allowed": true,
+   "reason": "conflictWhitelistWins",
+   "normalizedUrl": "https://a.test/ads/other"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://b.test/ads/banner",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://b.test/ads/banner"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://a.test/ads",
+   "allowed": true,
+   "reason": "conflictWhitelistWins",
+   "normalizedUrl": "https://a.test/ads"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://safe.example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://safe.example.com:8443/x"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com:8443/x"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://sub.example.com:8443/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://sub.example.com:8443/x"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://example.com/x",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "https://example.com/x"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://a.test/x?y=1",
+   "allowed": true,
+   "reason": "conflictWhitelistWins",
+   "normalizedUrl": "https://a.test/x?y=1"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://a.test/x/y/z",
+   "allowed": true,
+   "reason": "conflictWhitelistWins",
+   "normalizedUrl": "https://a.test/x/y/z"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://a.test/x/y",
+   "allowed": true,
+   "reason": "conflictWhitelistWins",
+   "normalizedUrl": "https://a.test/x/y"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://a.test/x/",
+   "allowed": true,
+   "reason": "conflictWhitelistWins",
+   "normalizedUrl": "https://a.test/x/"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://a.test/a*b",
+   "allowed": true,
+   "reason": "conflictWhitelistWins",
+   "normalizedUrl": "https://a.test/a*b"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://a.test/ab",
+   "allowed": true,
+   "reason": "conflictWhitelistWins",
+   "normalizedUrl": "https://a.test/ab"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://a.test/aXb",
+   "allowed": true,
+   "reason": "conflictWhitelistWins",
+   "normalizedUrl": "https://a.test/aXb"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "file:///sdcard/site/index.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/index.html"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "file:///sdcard/site/games/game.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/games/game.html"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "file:///sdcard/site/games/allowed.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/site/games/allowed.html"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "file:///sdcard/other.html",
+   "allowed": false,
+   "reason": "unmatchedDeny",
+   "normalizedUrl": "file:///sdcard/other.html"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://x.test/",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://x.test/"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://y.test/",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://y.test/"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://a.test/anything",
+   "allowed": true,
+   "reason": "conflictWhitelistWins",
+   "normalizedUrl": "https://a.test/anything"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://a.test/anything/private",
+   "allowed": true,
+   "reason": "conflictWhitelistWins",
+   "normalizedUrl": "https://a.test/anything/private"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://a.test/anything/public",
+   "allowed": true,
+   "reason": "conflictWhitelistWins",
+   "normalizedUrl": "https://a.test/anything/public"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "http://a.test/p",
+   "allowed": true,
+   "reason": "conflictWhitelistWins",
+   "normalizedUrl": "http://a.test/p"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://a.test/p",
+   "allowed": true,
+   "reason": "conflictWhitelistWins",
+   "normalizedUrl": "https://a.test/p"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://a.test/x/y/z/w",
+   "allowed": true,
+   "reason": "conflictWhitelistWins",
+   "normalizedUrl": "https://a.test/x/y/z/w"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://a.test/x/z",
+   "allowed": true,
+   "reason": "conflictWhitelistWins",
+   "normalizedUrl": "https://a.test/x/z"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://b.test/x/y/z",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://b.test/x/y/z"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://a.test/path",
+   "allowed": true,
+   "reason": "conflictWhitelistWins",
+   "normalizedUrl": "https://a.test/path"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://A.Test/Path/deep",
+   "allowed": true,
+   "reason": "conflictWhitelistWins",
+   "normalizedUrl": "https://a.test/Path/deep"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://a.test/path/deep",
+   "allowed": true,
+   "reason": "conflictWhitelistWins",
+   "normalizedUrl": "https://a.test/path/deep"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://sub.a.test/",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://sub.a.test/"
+  },
+  {
+   "config": "whitelistWinsMode",
+   "url": "https://a.example.com/",
+   "allowed": true,
+   "reason": "whitelistOnly",
+   "normalizedUrl": "https://a.example.com/"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://ads.example.com/x",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://ads.example.com/x"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://safe.example.com/x",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://safe.example.com/x"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://shop.example.com/safe/page",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://shop.example.com/safe/page"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://shop.example.com/safe",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://shop.example.com/safe"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://example.com/",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://example.com/"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "http://ads.other.test/y",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "http://ads.other.test/y"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://a.test/ads/banner",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/ads/banner"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://a.test/ads/other",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/ads/other"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://b.test/ads/banner",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://b.test/ads/banner"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://a.test/ads",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/ads"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://safe.example.com:8443/x",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://safe.example.com:8443/x"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://example.com:8443/x",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://example.com:8443/x"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://sub.example.com:8443/x",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://sub.example.com:8443/x"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://example.com/x",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://example.com/x"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://a.test/x?y=1",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/x?y=1"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://a.test/x/y/z",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/x/y/z"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://a.test/x/y",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/x/y"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://a.test/x/",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/x/"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://a.test/a*b",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/a*b"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://a.test/ab",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/ab"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://a.test/aXb",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/aXb"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "file:///sdcard/site/index.html",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "file:///sdcard/site/index.html"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "file:///sdcard/site/games/game.html",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "file:///sdcard/site/games/game.html"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "file:///sdcard/site/games/allowed.html",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "file:///sdcard/site/games/allowed.html"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "file:///sdcard/other.html",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "file:///sdcard/other.html"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://x.test/",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://x.test/"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://y.test/",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://y.test/"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://a.test/anything",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/anything"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://a.test/anything/private",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/anything/private"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://a.test/anything/public",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/anything/public"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "http://a.test/p",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "http://a.test/p"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://a.test/p",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/p"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://a.test/x/y/z/w",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/x/y/z/w"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://a.test/x/z",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/x/z"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://b.test/x/y/z",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://b.test/x/y/z"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://a.test/path",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/path"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://A.Test/Path/deep",
+   "allowed": false,
+   "reason": "blacklistOnly",
+   "normalizedUrl": "https://a.test/Path/deep"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://a.test/path/deep",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.test/path/deep"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://sub.a.test/",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://sub.a.test/"
+  },
+  {
+   "config": "caseSensitivity",
+   "url": "https://a.example.com/",
+   "allowed": true,
+   "reason": "unmatchedAllow",
+   "normalizedUrl": "https://a.example.com/"
+  }
+ ]
+}
