@@ -3,6 +3,7 @@ package com.xstocker.tabletbrowser
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -203,6 +204,13 @@ class MainActivity : FlutterActivity() {
                     result.success(mapOf("ok" to openManageStorageSettings()))
                 }
 
+                // Whether the app really holds MANAGE_EXTERNAL_STORAGE. Without
+                // it, listing /sdcard silently returns nothing, which looks
+                // exactly like an empty directory to the user.
+                "hasAllFilesAccess" -> {
+                    result.success(hasAllFilesAccess())
+                }
+
                 else -> result.notImplemented()
             }
         } catch (t: Throwable) {
@@ -242,6 +250,16 @@ class MainActivity : FlutterActivity() {
      * local-file browser needs on Android 11+. Falls back to the app details
      * screen on older releases.
      */
+    private fun hasAllFilesAccess(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            // Below Android 11 the legacy read permission is what matters.
+            checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+    }
+
     private fun openManageStorageSettings(): Boolean {
         return try {
             val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

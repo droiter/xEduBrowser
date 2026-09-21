@@ -147,6 +147,28 @@ void main() {
     expect(find.textContaining('https://a.test/x/y/z'), findsWidgets);
   });
 
+  testWidgets('the file browser warns when all-files access is missing',
+      (tester) async {
+    // No native side in a widget test, so hasAllFilesAccess() reports false —
+    // which is exactly the state a tablet is in before the parent grants it.
+    // Under /sdcard the listing silently comes back empty there, so the screen
+    // must say why instead of claiming the folder is empty.
+    // The screen asks the platform for all-files access from initState; that
+    // round trip needs the real event loop, so give it one before settling.
+    await pump(tester, const LocalFilesScreen(startPath: '/sdcard/Download'));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 60)));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('未获得「所有文件访问权限」'), findsOneWidget);
+    expect(find.text('打开系统权限设置'), findsWidgets);
+    expect(find.textContaining('显示为空'), findsWidgets);
+  });
+
+  testWidgets('no permission warning for a private directory', (tester) async {
+    await pump(tester, LocalFilesScreen(startPath: directory.path));
+    expect(find.textContaining('未获得「所有文件访问权限」'), findsNothing);
+  });
+
   testWidgets('local file browser lists the served directory', (tester) async {
     await pump(tester, LocalFilesScreen(startPath: directory.path));
     expect(find.textContaining('index.html'), findsWidgets);

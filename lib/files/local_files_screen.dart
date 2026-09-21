@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../browser/browser_bridge.dart';
 import '../state/app_scope.dart';
 import '../ui/theme.dart';
 
@@ -29,7 +30,10 @@ class LocalFilesScreen extends StatefulWidget {
 }
 
 class _LocalFilesScreenState extends State<LocalFilesScreen> {
-  static const int _maxEntries = 500;
+  /// Generous cap: hitting it used to hide files silently. The notice is also
+  /// shown at the *top* of the list now, not only after scrolling past
+  /// everything.
+  static const int _maxEntries = 2000;
 
   String? _path;
   List<FileSystemEntity> _entries = const <FileSystemEntity>[];
@@ -37,7 +41,10 @@ class _LocalFilesScreenState extends State<LocalFilesScreen> {
   List<FileSystemEntity> _files = const <FileSystemEntity>[];
   String? _error;
   bool _truncated = false;
-  bool _storageReadable = true;
+  /// null = not asked yet. Without all-files access Android returns an empty
+  /// listing for /sdcard instead of failing, so this flag is the only way to
+  /// tell "empty folder" from "not allowed".
+  bool? _hasAllFilesAccess;
 
   @override
   void initState() {
@@ -54,21 +61,15 @@ class _LocalFilesScreenState extends State<LocalFilesScreen> {
     }
   }
 
-  /// 检查 /sdcard 是否可读，用于给出“所有文件访问权限”的提示。
+  /// Asks the platform whether all-files access is actually granted.
+  ///
+  /// A previous version probed by listing /sdcard, but with scoped storage that
+  /// listing can still return a few entries while the folder the user cares
+  /// about comes back empty — so the warning never appeared and the user just
+  /// saw "这个目录是空的" with the file sitting right there.
   Future<void> _checkStorageAccess() async {
-    bool readable = false;
-    try {
-      final Directory dir = Directory('/sdcard');
-      if (await dir.exists()) {
-        await for (final FileSystemEntity _ in dir.list(followLinks: false)) {
-          readable = true;
-          break;
-        }
-      }
-    } catch (_) {
-      readable = false;
-    }
-    if (mounted) setState(() => _storageReadable = readable);
+    final bool granted = await BrowserBridge.hasAllFilesAccess();
+    if (mounted) setState(() => _hasAllFilesAccess = granted);
   }
 
   void _load(String path, {bool notify = true}) {
@@ -204,7 +205,9 @@ class _LocalFilesScreenState extends State<LocalFilesScreen> {
     final ThemeData theme = Theme.of(context);
     final String current = _path ?? state.store.directory.path;
     final bool underSdcard = current.startsWith('/sdcard');
-    final bool showPermissionHint = underSdcard && !_storageReadable;
+    // Show whenever we are under /sdcard and the permission is missing — not
+    // only when the listing happens to look unreadable.
+    final bool showPermissionHint = underSdcard && _hasAllFilesAccess == false;
 
     final List<_QuickJump> jumps = <_QuickJump>[
       _QuickJump('应用目录', state.store.directory.path, Icons.apps_outlined),
@@ -225,7 +228,13 @@ class _LocalFilesScreenState extends State<LocalFilesScreen> {
         actions: <Widget>[
           IconButton(
             tooltip: '刷新',
-            onPressed: () => _load(current),
+            // Re-asks for the permission too: the parent usually taps 刷新
+            // right after granting all-files access in system settings, and a
+            // stale "no permission" banner would be confusing.
+            onPressed: () {
+              _checkStorageAccess();
+              _load(current);
+            },
             icon: const Icon(Icons.refresh),
           ),
         ],
@@ -287,14 +296,18 @@ class _LocalFilesScreenState extends State<LocalFilesScreen> {
                                   size: 18, color: theme.colorScheme.error),
                               const SizedBox(width: 8),
                               Expanded(
-                                child: Text('无法读取 /sdcard', style: theme.textTheme.titleSmall),
+                                child: Text(
+                                  '未获得「所有文件访问权限」',
+                                  style: theme.textTheme.titleSmall,
+                                ),
                               ),
                             ],
                           ),
                           const SizedBox(height: 6),
                           const Text(
-                            'Android 11 及以上限制了共享存储访问，本应用需要「所有文件访问权限」'
-                            '才能浏览 /sdcard 下的文件。请到系统设置中开启，或改用应用私有目录。',
+                            'Android 11 及以上限制了共享存储访问。没有这个权限时，'
+                            '/sdcard 下的目录会显示为空（文件仍在，只是读不到），'
+                            '于是无法选取其中的网页。授权后点「刷新」即可。',
                           ),
                           const SizedBox(height: 10),
                           FilledButton.icon(
@@ -338,6 +351,12 @@ class _LocalFilesScreenState extends State<LocalFilesScreen> {
   }
 
   Widget _buildListing(ThemeData theme, String current) {
+    // While the platform query is still in flight (`null`), an empty /sdcard
+    // folder is far more likely to be a permission problem than a truly empty
+    // folder — Android returns nothing rather than failing. Once the query
+    // says the permission is granted, the plain "empty" message returns.
+    final bool treatEmptyAsPermission =
+        underSdcardPath(current) && _hasAllFilesAccess != true;
     if (_error != null) {
       return EmptyState(
         icon: Icons.folder_off_outlined,
@@ -354,6 +373,19 @@ class _LocalFilesScreenState extends State<LocalFilesScreen> {
     }
 
     if (_entries.isEmpty) {
+      if (treatEmptyAsPermission) {
+        return EmptyState(
+          icon: Icons.lock_outline,
+          title: '看不到文件？缺少「所有文件访问权限」',
+          message: '本应用还没有获得该权限，Android 会让 /sdcard 下的目录显示为空——'
+              '文件其实还在。授权后回到这里点右上角「刷新」即可看到。',
+          action: FilledButton.icon(
+            onPressed: _openStorageSettings,
+            icon: const Icon(Icons.settings_outlined),
+            label: const Text('打开系统权限设置'),
+          ),
+        );
+      }
       return const EmptyState(
         icon: Icons.folder_open_outlined,
         title: '这个目录是空的',

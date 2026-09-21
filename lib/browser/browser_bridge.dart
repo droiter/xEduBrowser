@@ -89,6 +89,12 @@ abstract final class BrowserBridge {
 
   static Future<void> openManageStorageSettings() =>
       _invoke<void>('openManageStorageSettings');
+
+  /// True when the app may actually list `/sdcard`. Without all-files access
+  /// Android returns an *empty* listing instead of throwing, so the UI cannot
+  /// tell "empty folder" from "not allowed" without asking this.
+  static Future<bool> hasAllFilesAccess() async =>
+      await _invoke<bool>('hasAllFilesAccess') ?? false;
 }
 
 /// A normalised view of a native event, so the UI never digs into raw maps.
