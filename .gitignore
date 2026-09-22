@@ -54,3 +54,6 @@ android/.gradle/
 *.apk
 *.aab
 tablet_browser-*.zip
+
+# Release bundles (dist/xEduBrowser-v<版本>-<日期时间>.zip)
+/dist/

@@ -19,6 +19,24 @@
 
 ---
 
+## 版本与发布约定（每次出版本都要遵守）
+
+1. **版本号只增不减**。默认把 `pubspec.yaml` 的 patch 位 +1，构建号（`+N`）同时 +1；
+   小版本用 `--bump minor`，大版本用 `--bump major`。脚本会拒绝比当前版本更低的版本号。
+2. **发布压缩包的文件名必须带版本号 + 日期时间**，用来区分不同批次：
+   `xEduBrowser-v<版本>-<YYYYMMDD-HHMM>.zip`，例如 `xEduBrowser-v1.0.1-20260922-0310.zip`。
+3. 包内附 `SHA256SUMS.txt`，包外同名 `.sha256`，上传后与服务器端 sha256 比对一致才算发布成功。
+4. 打 tag `v<版本>` 并推送；`dist/` 不入库（`.gitignore` 已忽略）。
+
+发布一条命令搞定（见 `tool/release.sh`、`tool/upload_dist.sh`）：
+
+```bash
+tool/release.sh --upload --push        # patch +1 → 构建 → 打包 → 提交/打tag/推送 → 免密上传
+tool/release.sh --bump minor           # 只构建打包，不上传
+```
+
+---
+
 ## 一、功能概览
 
 **浏览能力**
@@ -268,6 +286,16 @@ flutter build apk --release          # 产物：build/app/outputs/flutter-apk/ap
 flutter build apk --debug            # 需要更快时可以只打 debug
 adb install -r build/app/outputs/flutter-apk/app-release.apk
 ```
+
+**发布版本请用脚本**，它负责递增版本号、构建四个 APK、生成带版本与时间戳的压缩包并（可选）上传：
+
+```bash
+tool/release.sh --help               # 看用法
+tool/release.sh --upload --push      # 例如：发布 v1.0.1 并上传到 yacc@192.168.1.120:/var/www/html/
+```
+
+产物落在 `dist/`：`xEduBrowser-v1.0.1-20260922-0310.zip`（内含 4 个 APK + `SHA256SUMS.txt`）
+与同名 `.sha256`。上传脚本走 ssh 公钥免密，8MB 分片续传，远端重组后再比对 sha256。
 
 > **依赖锁定说明**：`pubspec.yaml` 把 `path_provider_android` 固定在 `2.2.23`。2.3.x 会引入
 > `jni` / `jni_flutter` 插件，它们是原生构建、需要 Android SDK 里有 CMake 工具链；在只有
