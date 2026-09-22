@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../files/local_files_screen.dart';
+import 'bookmark_import.dart';
 import '../state/app_scope.dart';
 import 'bookmark.dart';
 
@@ -32,30 +33,31 @@ Future<BookmarkEditResult?> showBookmarkDialog(
   required bool whitelistDefault,
   bool isEditing = false,
   String categoryId = uncategorizedId,
-}) =>
-    showDialog<BookmarkEditResult>(
-      context: context,
-      builder: (context) => _BookmarkFormDialog(
-        url: url,
-        initialTitle: initialTitle,
-        whitelistDefault: whitelistDefault,
-        isEditing: isEditing,
-        categoryId: categoryId,
-      ),
-    );
+}) => showDialog<BookmarkEditResult>(
+  context: context,
+  builder: (context) => _BookmarkFormDialog(
+    url: url,
+    initialTitle: initialTitle,
+    whitelistDefault: whitelistDefault,
+    isEditing: isEditing,
+    categoryId: categoryId,
+  ),
+);
 
 /// Renames a bookmark. Returns the new title, or null on cancel.
 Future<String?> showBookmarkRenameDialog(
   BuildContext context, {
   required String initialTitle,
-}) =>
-    showDialog<String>(
-      context: context,
-      builder: (context) => _RenameDialog(initialTitle: initialTitle),
-    );
+}) => showDialog<String>(
+  context: context,
+  builder: (context) => _RenameDialog(initialTitle: initialTitle),
+);
 
 /// Test hook for the 浏览本地文件 button.
 const Key browseLocalFileKey = ValueKey<String>('bookmark-browse-local');
+
+/// Test hook for the 标题来源 dropdown of a local page.
+const Key bookmarkTitleSourceKey = ValueKey<String>('bookmark-title-source');
 
 /// Asks for an address, for adding a bookmark when no page is open (the home
 /// page's own ＋ tile). The address can be typed, or picked through the local
@@ -75,8 +77,24 @@ Future<bool?> confirmBookmarkDelete(
   final grants = bookmark.whitelistPattern != null;
   return showDialog<bool>(
     context: context,
-    builder: (context) => _DeleteConfirmDialog(bookmark: bookmark, grants: grants),
+    builder: (context) =>
+        _DeleteConfirmDialog(bookmark: bookmark, grants: grants),
   );
+}
+
+/// Where the 标题来源 dropdown takes a local page's title from.
+enum _TitleSource {
+  /// The HTML file's own name, without its extension.
+  fileName,
+
+  /// The folder the file sits in.
+  directoryName,
+
+  /// The page's `<title>` (disabled when the file has none).
+  internalTitle,
+
+  /// Nothing: the field is cleared and the tile falls back to the host.
+  blank,
 }
 
 /// The form for adding or editing a bookmark.
@@ -105,8 +123,9 @@ class _BookmarkFormDialog extends StatefulWidget {
 }
 
 class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
-  late final TextEditingController _title =
-      TextEditingController(text: widget.initialTitle);
+  late final TextEditingController _title = TextEditingController(
+    text: widget.initialTitle,
+  );
   final TextEditingController _newCategory = TextEditingController();
   late bool _grant = widget.whitelistDefault;
   late String _categoryId = widget.categoryId;
@@ -126,11 +145,123 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
 
   bool get _isLocalFile => _policyUrl.startsWith('file://');
 
+  /// Title candidates for a local page (file name / folder / `<title>`), or
+  /// null when the address is not a local file — a remote page has none of
+  /// these, so the dialog shows no 标题来源 dropdown for it.
+  late final LocalPageTitles? _titles = _isLocalFile
+      ? LocalPageTitles.forUrl(_policyUrl)
+      : null;
+
+  /// Which candidate the title field currently holds, or null once it is the
+  /// user's own text.
+  _TitleSource? _titleSource;
+
+  @override
+  void initState() {
+    super.initState();
+    final titles = _titles;
+    if (titles == null) return;
+    // A brand-new local bookmark starts from the best available name so the
+    // tile is not blank; the user can pick another source or edit the text.
+    // An existing (or already typed) title is never overwritten.
+    if (widget.initialTitle.trim().isNotEmpty) return;
+    for (final source in const [
+      _TitleSource.internalTitle,
+      _TitleSource.fileName,
+      _TitleSource.directoryName,
+    ]) {
+      final candidate = _textFor(source);
+      if (candidate.isNotEmpty) {
+        _title.text = candidate;
+        _titleSource = source;
+        break;
+      }
+    }
+  }
+
+  /// The text a source would put in the title field.
+  String _textFor(_TitleSource source) {
+    final titles = _titles;
+    if (titles == null) return '';
+    switch (source) {
+      case _TitleSource.fileName:
+        return titles.fileName.trim();
+      case _TitleSource.directoryName:
+        return titles.directoryName.trim();
+      case _TitleSource.internalTitle:
+        return (titles.internalTitle ?? '').trim();
+      case _TitleSource.blank:
+        return '';
+    }
+  }
+
+  /// Fills the title field from the chosen source, leaving it editable.
+  void _applyTitleSource(_TitleSource? source) {
+    if (source == null) return;
+    final text = _textFor(source);
+    setState(() {
+      _titleSource = source;
+      _title.text = text;
+      _title.selection = TextSelection.collapsed(offset: text.length);
+    });
+  }
+
   @override
   void dispose() {
     _title.dispose();
     _newCategory.dispose();
     super.dispose();
+  }
+
+  /// The 标题来源 dropdown: picking an entry fills the title field above the
+  /// user's cursor, and the field stays editable.
+  Widget _titleSourceField(ThemeData theme) {
+    final titles = _titles!;
+    final internal = titles.internalTitle?.trim() ?? '';
+    return DropdownButtonFormField<_TitleSource>(
+      key: bookmarkTitleSourceKey,
+      initialValue: _titleSource,
+      isExpanded: true,
+      decoration: const InputDecoration(
+        labelText: '标题来源',
+        helperText: '选择后自动填入下面的标题，可以再修改',
+        helperMaxLines: 2,
+        border: OutlineInputBorder(),
+      ),
+      hint: const Text('选择标题来源'),
+      items: [
+        DropdownMenuItem(
+          value: _TitleSource.fileName,
+          child: Text(
+            'HTML 文件名：${titles.fileName}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        DropdownMenuItem(
+          value: _TitleSource.directoryName,
+          child: Text(
+            '所在目录名：${titles.directoryName}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        DropdownMenuItem(
+          value: _TitleSource.internalTitle,
+          enabled: titles.hasInternalTitle,
+          child: Text(
+            titles.hasInternalTitle ? '网页内部标题：$internal' : '网页内部标题（这个文件没有）',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: titles.hasInternalTitle
+                ? null
+                : TextStyle(color: theme.disabledColor),
+          ),
+        ),
+        const DropdownMenuItem(value: _TitleSource.blank, child: Text('留空')),
+      ],
+      onChanged: _applyTitleSource,
+    );
   }
 
   Future<void> _save() async {
@@ -145,11 +276,13 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
       }
     }
     if (!mounted) return;
-    Navigator.of(context).pop(BookmarkEditResult(
-      title: _title.text,
-      grantWhitelist: _grant,
-      categoryId: categoryId,
-    ));
+    Navigator.of(context).pop(
+      BookmarkEditResult(
+        title: _title.text,
+        grantWhitelist: _grant,
+        categoryId: categoryId,
+      ),
+    );
   }
 
   @override
@@ -174,9 +307,13 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
                 ),
               ),
               const SizedBox(height: 16),
+              if (_titles != null) ...[
+                _titleSourceField(theme),
+                const SizedBox(height: 16),
+              ],
               TextField(
                 controller: _title,
-                autofocus: true,
+                autofocus: !_isLocalFile,
                 decoration: const InputDecoration(
                   labelText: '标题',
                   hintText: '显示在方块下方，例如：学校作业平台',
@@ -196,8 +333,14 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
                     child: Text(uncategorizedLabel),
                   ),
                   for (final category in categories)
-                    DropdownMenuItem(value: category.id, child: Text(category.name)),
-                  const DropdownMenuItem(value: _createSentinel, child: Text('＋ 新建分类…')),
+                    DropdownMenuItem(
+                      value: category.id,
+                      child: Text(category.name),
+                    ),
+                  const DropdownMenuItem(
+                    value: _createSentinel,
+                    child: Text('＋ 新建分类…'),
+                  ),
                 ],
                 onChanged: (value) {
                   if (value == null) return;
@@ -238,13 +381,15 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
                   child: Text(
                     _isLocalFile
                         ? (BookmarkWhitelist.wholeSiteWidens(_policyUrl)
-                            ? '本地网页的样式、脚本、页面图片都在同一个目录里，'
-                                '所以除了这个文件本身，还会放行它所在的目录。'
-                            : '这个文件就在存储卡根目录下，放行它的目录等于放行整张存储卡，'
-                                '所以只放行该文件本身。')
+                              ? '本地网页的样式、脚本、页面图片都在同一个目录里，'
+                                    '所以除了这个文件本身，还会放行它所在的目录。'
+                              : '这个文件就在存储卡根目录下，放行它的目录等于放行整张存储卡，'
+                                    '所以只放行该文件本身。')
                         : '除了这个地址，还会放行它所在的整个网站，'
-                            '页面引用的站内样式、脚本和图片才能加载。',
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+                              '页面引用的站内样式、脚本和图片才能加载。',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.hintColor,
+                    ),
                   ),
                 ),
             ],
@@ -276,8 +421,9 @@ class _RenameDialog extends StatefulWidget {
 }
 
 class _RenameDialogState extends State<_RenameDialog> {
-  late final TextEditingController _title =
-      TextEditingController(text: widget.initialTitle);
+  late final TextEditingController _title = TextEditingController(
+    text: widget.initialTitle,
+  );
 
   @override
   void dispose() {
@@ -432,11 +578,14 @@ class _DeleteConfirmDialogState extends State<_DeleteConfirmDialog> {
               CheckboxListTile(
                 contentPadding: EdgeInsets.zero,
                 value: _removeRule,
-                onChanged: (value) => setState(() => _removeRule = value ?? false),
+                onChanged: (value) =>
+                    setState(() => _removeRule = value ?? false),
                 title: const Text('同时移除对应的白名单条目'),
                 subtitle: Text(
                   widget.bookmark.whitelistPatterns.join('\n'),
-                  style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontFamily: 'monospace',
+                  ),
                 ),
               ),
               Text(

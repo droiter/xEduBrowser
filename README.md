@@ -203,6 +203,9 @@ tool/release.sh --bump minor           # 只构建打包，不上传
   用右上角菜单 →「更新当前页预览图」（仅当当前页面已加入书签时出现）。
 - 删除书签时可以选择同时移除它带来的白名单条目（若该条目仍被其他书签使用则保留）。
 - 对话框里的「**浏览本地文件**」可以直接翻到 `/sdcard` 里的 HTML，选中后地址自动填入。
+- 本地 HTML 的标题有**「标题来源」下拉菜单**（第一个选项自动取好、可再手改）：
+  `HTML 文件名（去后缀）`、`所在目录名`、`网页内部标题`（文件里没有 `<title>` 时该选项禁用并注明）、
+  `留空`。选中即填入标题输入框，之后仍可自由编辑。
 - 本地网页（`file://`）的放行范围**包含它所在的整个目录**（规则形如
   `file:///sdcard/Books/Caterpillar/`）：翻页书这类本地 HTML 会引用同目录下的 `mobile/`、
   `files/` 等成百上千个相对资源，只放行那个 `.html` 会让页面变成**空白页**。
@@ -301,7 +304,7 @@ export ANDROID_HOME=/opt/android-sdk
 cd tablet_browser
 flutter pub get
 
-# 单元测试（Dart 侧，314 个）
+# 单元测试（Dart 侧，320 个）
 flutter test
 
 # 原生过滤引擎的 JVM 单元测试（642 个，需要 Gradle）
@@ -337,7 +340,7 @@ tool/release.sh --upload --push      # 例如：发布 v1.0.1 并上传到 yacc@
 
 ## 六、测试与验证
 
-**Dart 侧：314 个测试全部通过**（`flutter analyze` 全项目零问题）
+**Dart 侧：320 个测试全部通过**（`flutter analyze` 全项目零问题）
 
 | 测试文件 | 覆盖内容 |
 |---|---|
@@ -354,10 +357,10 @@ tool/release.sh --upload --push      # 例如：发布 v1.0.1 并上传到 yacc@
 | `test/parental_gate_password_test.dart` | 密码门真实渲染：首次进入的设置流程与校验、错密码提示与剩余次数、5 次锁定并禁用输入、**名单页默认受保护**、关掉保护后可直接进入 |
 | `test/parental_settings_ui_test.dart` | 设置页家长控件：验证方式切换、设置/修改/清除密码（含两次输入不一致的拒绝）、**名单页保护开关默认开启且可关闭** |
 | `test/bookmark_test.dart` | 书签持久化（含 v1 单字段兼容）、预览图文件名唯一化与旧图回收、孤儿清理、书签↔白名单联动（网址 + 站点双规则、共享规则不误删）、**回环地址规范化与启动修复**、中文路径百分号编码 |
-| `test/bookmark_ui_test.dart` | 首页磁贴真实渲染：名称、已放行徽标、点击打开、缺失截图退化为字母方块、添加按钮、数量自适应 |
+| `test/bookmark_ui_test.dart` | 首页磁贴真实渲染：名称、已放行徽标、点击打开、缺失截图退化为字母方块、数量自适应；书签对话框的**「标题来源」下拉（填入后可再编辑）** |
 | `test/bookmark_category_test.dart` | 分类增删改、删除分类保留书签、分类内排序与跨分类移动、顺序落盘、**v1→v2 存储迁移** |
 | `test/bookmark_category_ui_test.dart` | 首页分组渲染、**标题位于方块下方**（几何断言）、**拖动排序**（同分类与跨分类）、⋮ 菜单改标题 |
-| `test/bookmark_import_test.dart` | 目录扫描规则（一级子目录、递归、跳过隐藏目录、上限）、`<title>` 提取与文件名兜底、URL 解析、导入去重与三档白名单 |
+| `test/bookmark_import_test.dart` | 目录扫描规则（一级子目录、递归、跳过隐藏目录、上限）、`<title>` 提取与文件名兜底、**标题候选（文件名/目录名/内部标题，含编码 URL）**、URL 解析、导入去重与三档白名单 |
 | `test/bookmark_import_ui_test.dart` | 导入对话框端到端：预览内容、确认后写入指定分类并生效一条规则、取消不改动、空目录提示 |
 | `test/bookmark_settings_ui_test.dart` | 设置页书签卡片：添加书签（网址 + 所在站点一起放行）、列表与删除、分类管理面板 |
 | `test/browser_lifecycle_test.dart` | 视图生命周期：视图未创建/已销毁时导航**排队并在创建后重放**（不再被静默丢弃成空白页）、刷新在视图消失时会重新加载 |
@@ -379,7 +382,7 @@ tool/release.sh --upload --push      # 例如：发布 v1.0.1 并上传到 yacc@
 把「两个实现是否彼此一致」也钉死。实测结果：
 
 ```
-Dart:   314 tests, 0 failures
+Dart:   320 tests, 0 failures
 Kotlin: 642 tests, 0 failures
 flutter analyze: No issues found
 flutter build apk --release: ✓ app-release.apk (52 MB)
@@ -397,7 +400,7 @@ cd android && ./gradlew :app:testDebugUnitTest                  # Kotlin
 ## 七、已知限制
 
 1. **未在真机/模拟器上运行过。** 本环境没有连接任何 Android 设备，也没有系统镜像，
-   因此验证到的是：`flutter build apk --release` 成功产出 APK、Dart 侧 314 个测试通过
+   因此验证到的是：`flutter build apk --release` 成功产出 APK、Dart 侧 320 个测试通过
    （含各管理界面的真实渲染测试）、Kotlin 侧 627 个测试通过。真机上的 WebView 渲染、
    手势、以及第 2 条描述的标签页显示问题，仍需要在设备上确认。
 2. **多标签页用 `IndexedStack` 保活**。这样切标签不会重新加载页面，但 Android 混合渲染下

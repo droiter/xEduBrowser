@@ -299,6 +299,63 @@ abstract final class BookmarkImporter {
       path.endsWith('/') ? path.substring(0, path.length - 1) : path;
 }
 
+/// The names a local page can be titled with.
+///
+/// The bookmark dialog offers them as a 标题来源 dropdown: the file's own name,
+/// the folder it sits in, the page's `<title>`, or nothing at all. Picking one
+/// fills the title field, which the user can still edit.
+class LocalPageTitles {
+  const LocalPageTitles({
+    required this.fileName,
+    required this.directoryName,
+    required this.internalTitle,
+  });
+
+  /// File name without its extension, e.g. `Caterpillar ebook`.
+  final String fileName;
+
+  /// Name of the folder the file sits in, e.g. `好奇的毛毛虫`.
+  final String directoryName;
+
+  /// The page's own `<title>`, or null when it has none (or cannot be read).
+  final String? internalTitle;
+
+  bool get hasInternalTitle =>
+      internalTitle != null && internalTitle!.trim().isNotEmpty;
+
+  /// Candidates for a local page URL, or null when [url] is not a local file.
+  static LocalPageTitles? forUrl(String url) {
+    final path = LocalFileUrl.pathOf(url);
+    if (path == null || path.isEmpty) return null;
+    return forPath(path);
+  }
+
+  /// Candidates for a filesystem path. Reading the `<title>` is one small
+  /// synchronous read, exactly like the directory scan does.
+  static LocalPageTitles forPath(String filePath) {
+    final name = _pathBaseName(filePath);
+    final dot = name.lastIndexOf('.');
+    return LocalPageTitles(
+      fileName: dot > 0 ? name.substring(0, dot) : name,
+      directoryName: _pathParentName(filePath),
+      internalTitle: BookmarkImporter.readHtmlTitle(filePath),
+    );
+  }
+}
+
+String _pathBaseName(String path) {
+  final trimmed = path.endsWith('/') ? path.substring(0, path.length - 1) : path;
+  final slash = trimmed.lastIndexOf('/');
+  return slash < 0 ? trimmed : trimmed.substring(slash + 1);
+}
+
+String _pathParentName(String path) {
+  final trimmed = path.endsWith('/') ? path.substring(0, path.length - 1) : path;
+  final slash = trimmed.lastIndexOf('/');
+  if (slash <= 0) return trimmed;
+  return _pathBaseName(trimmed.substring(0, slash));
+}
+
 /// What an import actually did.
 class BookmarkImportOutcome {
   final int added;

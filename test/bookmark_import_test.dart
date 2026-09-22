@@ -165,6 +165,52 @@ void main() {
     });
   });
 
+  group('title candidates for one local page', () {
+    test('offers the file name, the folder name and the <title>', () {
+      writeHtml('${root.path}/课件/第一课.html', title: '拼音第一课');
+
+      final titles = LocalPageTitles.forPath('${root.path}/课件/第一课.html');
+      expect(titles.fileName, '第一课');
+      expect(titles.directoryName, '课件');
+      expect(titles.internalTitle, '拼音第一课');
+      expect(titles.hasInternalTitle, isTrue);
+    });
+
+    test('a page without a title still offers a name and a folder', () {
+      writeHtml('${root.path}/课件/无标题.html');
+
+      final titles = LocalPageTitles.forPath('${root.path}/课件/无标题.html');
+      expect(titles.fileName, '无标题');
+      expect(titles.directoryName, '课件');
+      expect(titles.internalTitle, isNull);
+      expect(titles.hasInternalTitle, isFalse);
+    });
+
+    test('a missing file or an extension-less name is handled', () {
+      final missing = LocalPageTitles.forPath('${root.path}/课件/nope.html');
+      expect(missing.fileName, 'nope');
+      expect(missing.directoryName, '课件');
+      expect(missing.internalTitle, isNull);
+
+      // No dot: the whole name is the title candidate.
+      expect(LocalPageTitles.forPath('/sdcard/README').fileName, 'README');
+    });
+
+    test('works from a file URL and from a loopback URL', () {
+      writeHtml('${root.path}/课件/第一课.html', title: '拼音第一课');
+
+      final fromFile = LocalPageTitles.forUrl(
+        'file://${root.path}/课件/第一课.html',
+      );
+      expect(fromFile?.internalTitle, '拼音第一课');
+      // Percent-encoded paths are decoded before the file is read.
+      final encoded = Uri.file('${root.path}/课件/第一课.html').toString();
+      expect(LocalPageTitles.forUrl(encoded)?.internalTitle, '拼音第一课');
+      // A remote page has none of these candidates.
+      expect(LocalPageTitles.forUrl('https://school.test/lessons'), isNull);
+    });
+  });
+
   group('import into a category', () {
     late AppState state;
 
