@@ -558,7 +558,14 @@ class AppState extends ChangeNotifier {
 
     var thumbnailPath = existing?.thumbnailPath;
     if (thumbnail != null && thumbnail.isNotEmpty) {
-      thumbnailPath = await bookmarkStore.writeThumbnail(id, thumbnail) ?? thumbnailPath;
+      final written = await bookmarkStore.writeThumbnail(id, thumbnail);
+      if (written != null) {
+        // Same reason as setBookmarkThumbnail: a new file name, old file gone.
+        if (thumbnailPath != null && thumbnailPath != written) {
+          await bookmarkStore.deleteThumbnail(thumbnailPath);
+        }
+        thumbnailPath = written;
+      }
     }
 
     var whitelistPatterns = existing?.whitelistPatterns ?? const <String>[];
@@ -707,11 +714,18 @@ class AppState extends ChangeNotifier {
     await _persistBookmarks();
   }
 
-  /// Replaces a bookmark's screenshot (used when refreshing a stale tile).
+  /// Replaces a bookmark's screenshot (a fresher capture of the same page).
+  ///
+  /// The old file is deleted once the new path is in place, so the preview
+  /// cache cannot serve the previous image.
   Future<void> setBookmarkThumbnail(Bookmark bookmark, Uint8List bytes) async {
+    final previous = bookmark.thumbnailPath;
     final path = await bookmarkStore.writeThumbnail(bookmark.id, bytes);
     if (path == null) return;
     await updateBookmark(bookmark.copyWith(thumbnailPath: path));
+    if (previous != null && previous != path) {
+      await bookmarkStore.deleteThumbnail(previous);
+    }
   }
 
   Future<void> _persistBookmarks() => bookmarkStore.save(_library);

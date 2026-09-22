@@ -105,6 +105,18 @@ void main() {
       await bookmarkStore.deleteThumbnail(null);
     });
 
+    test('every capture gets its own file name', () async {
+      final bookmarkStore = BookmarkStore(directory);
+      final first = await bookmarkStore.writeThumbnail('b1', Uint8List.fromList([1]));
+      final second = await bookmarkStore.writeThumbnail('b1', Uint8List.fromList([2]));
+
+      // The tile renders through `Image.file`, whose cache is keyed by path:
+      // rewriting one path would keep showing the previous preview.
+      expect(second, isNot(first));
+      expect(File(first!).readAsBytesSync(), [1]);
+      expect(File(second!).readAsBytesSync(), [2]);
+    });
+
     test('prunes screenshots no bookmark references', () async {
       final bookmarkStore = BookmarkStore(directory);
       final kept = await bookmarkStore.writeThumbnail('kept', Uint8List.fromList([1]));
@@ -489,6 +501,23 @@ void main() {
       final updated = state.bookmarks.single;
       expect(updated.thumbnailPath, isNotNull);
       expect(File(updated.thumbnailPath!).readAsBytesSync(), [9, 9]);
+    });
+
+    test('a fresh capture retires the old preview file', () async {
+      final bookmark = await state.addBookmark(
+        url: 'https://a.test/x',
+        title: 'A',
+        thumbnail: Uint8List.fromList([1, 2, 3]),
+      );
+      final firstPath = bookmark.thumbnailPath!;
+
+      await state.setBookmarkThumbnail(bookmark, Uint8List.fromList([9, 9, 9]));
+
+      final updated = state.bookmarks.single;
+      expect(updated.thumbnailPath, isNot(firstPath));
+      expect(File(updated.thumbnailPath!).readAsBytesSync(), [9, 9, 9]);
+      expect(File(firstPath).existsSync(), isFalse,
+          reason: '旧的预览图文件应被删除，避免残留与缓存错乱');
     });
   });
 }

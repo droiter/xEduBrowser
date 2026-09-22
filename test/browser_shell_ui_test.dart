@@ -15,6 +15,9 @@ void main() {
   late Directory directory;
   late AppState state;
 
+  /// What the mocked `captureThumbnail` returns.
+  final previewBytes = Uint8List.fromList(<int>[137, 80, 78, 71, 1, 2, 3, 4]);
+
   setUp(() {
     directory = Directory.systemTemp.createTempSync('tb_shell');
     state = AppState(
@@ -31,14 +34,24 @@ void main() {
     const commands = MethodChannel('tablet_browser/commands');
     const events = MethodChannel('tablet_browser/events');
     final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-    messenger.setMockMethodCallHandler(commands, (call) async => null);
+    messenger.setMockMethodCallHandler(commands, (call) async {
+      if (call.method == 'captureThumbnail') return previewBytes;
+      return null;
+    });
     messenger.setMockMethodCallHandler(events, (call) async => null);
+    // Navigating away from the start page builds the PlatformView; there is no
+    // Android host in a widget test, so answer its creation call.
+    messenger.setMockMethodCallHandler(
+      const MethodChannel('flutter/platform_views'),
+      (call) async => <String, dynamic>{'id': 0},
+    );
   });
 
   tearDown(() {
     final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(const MethodChannel('tablet_browser/commands'), null);
     messenger.setMockMethodCallHandler(const MethodChannel('tablet_browser/events'), null);
+    messenger.setMockMethodCallHandler(const MethodChannel('flutter/platform_views'), null);
     if (directory.existsSync()) directory.deleteSync(recursive: true);
   });
 
@@ -63,6 +76,32 @@ void main() {
       ),
     );
     await tester.pump();
+  }
+
+  /// Delivers a native event on `tablet_browser/events`, as the Android side
+  /// would.
+  Future<void> sendNativeEvent(WidgetTester tester, Map<String, dynamic> event) async {
+    await tester.runAsync(() async {
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .handlePlatformMessage(
+        'tablet_browser/events',
+        const StandardMethodCodec().encodeSuccessEnvelope(event),
+        (_) {},
+      );
+    });
+    await tester.pump();
+  }
+
+  /// Real file I/O only completes outside the fake-async zone.
+  Future<void> waitFor(
+    WidgetTester tester,
+    bool Function() done, {
+    int tries = 80,
+  }) async {
+    for (var i = 0; i < tries && !done(); i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 30));
+    }
   }
 
   testWidgets('the browser has no address bar', (tester) async {
@@ -93,5 +132,40 @@ void main() {
     expect(find.text('网页引擎'), findsOneWidget);
     // The bookmark card, where bookmarks are added now.
     expect(find.text('添加书签'), findsWidgets);
+  });
+
+  testWidgets('opening a bookmarked page captures its tile preview',
+      (tester) async {
+    await tester.runAsync(() async {
+      await state.addBookmark(url: 'https://school.test/lessons', title: '课程平台');
+    });
+    expect(state.bookmarks.single.thumbnailPath, isNull);
+
+    await pumpShell(tester);
+    await sendNativeEvent(tester, <String, dynamic>{
+      'type': 'pageFinished',
+      'viewId': 1,
+      'url': 'https://school.test/lessons',
+      'title': '课程平台',
+    });
+    await waitFor(tester, () => state.bookmarks.single.thumbnailPath != null);
+
+    final path = state.bookmarks.single.thumbnailPath;
+    expect(path, isNotNull);
+    expect(File(path!).readAsBytesSync(), previewBytes,
+        reason: '截图应写入书签的预览图文件');
+  });
+
+  testWidgets('a page that is not bookmarked is not screenshotted',
+      (tester) async {
+    await pumpShell(tester);
+    await sendNativeEvent(tester, <String, dynamic>{
+      'type': 'pageFinished',
+      'viewId': 1,
+      'url': 'https://other.test/page',
+      'title': '别的页面',
+    });
+    await tester.pump(const Duration(seconds: 2));
+    expect(state.bookmarks, isEmpty);
   });
 }

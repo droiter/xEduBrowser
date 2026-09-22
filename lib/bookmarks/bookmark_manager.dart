@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../browser/url_input.dart';
@@ -161,10 +163,14 @@ class _BookmarkRow extends StatelessWidget {
     final theme = Theme.of(context);
     final patterns = bookmark.whitelistPatterns;
     final local = bookmark.url.startsWith('file://');
+    final thumbnail = bookmark.thumbnailPath;
 
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      leading: Icon(local ? Icons.insert_drive_file_outlined : Icons.public),
+      leading: _Preview(
+        path: thumbnail,
+        fallback: Icon(local ? Icons.insert_drive_file_outlined : Icons.public),
+      ),
       title: Text(bookmark.displayTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -180,6 +186,13 @@ class _BookmarkRow extends StatelessWidget {
             '${state.categoryLabel(bookmark.categoryId)} · '
             '${patterns.isEmpty ? '未加入白名单' : '白名单：${patterns.join('、')}'}',
             maxLines: 2,
+            style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            thumbnail == null || thumbnail.isEmpty
+                ? '预览图：打开该页面后自动生成'
+                : '预览图：已生成，打开该页面会刷新',
             style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
           ),
         ],
@@ -233,5 +246,36 @@ class _BookmarkRow extends StatelessWidget {
         if (removeRule == null) return;
         await state.removeBookmark(bookmark, removeWhitelistRule: removeRule);
     }
+  }
+}
+
+/// The list's leading picture: the captured preview when there is one, and the
+/// supplied icon until the page has been opened once.
+class _Preview extends StatelessWidget {
+  const _Preview({required this.path, required this.fallback});
+
+  final String? path;
+  final Widget fallback;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    if (path == null || path!.isEmpty) {
+      return SizedBox(width: 44, height: 44, child: Center(child: fallback));
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: SizedBox(
+        width: 44,
+        height: 44,
+        child: Image.file(
+          File(path!),
+          fit: BoxFit.cover,
+          cacheWidth: 132,
+          errorBuilder: (context, error, stack) =>
+              Center(child: Icon(Icons.broken_image_outlined, color: theme.hintColor)),
+        ),
+      ),
+    );
   }
 }

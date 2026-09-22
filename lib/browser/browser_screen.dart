@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../bookmarks/bookmark.dart';
 import '../bookmarks/bookmark_dialog.dart';
 import '../files/local_files_screen.dart';
 import '../log/request_log_screen.dart';
@@ -58,6 +59,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
   bool _wired = false;
   int _nextViewId = 1;
   int _activeIndex = 0;
+
+  /// Bookmark ids whose preview was already refreshed during this app run, so a
+  /// page that reloads (or is opened twice) is not re-screenshotted every time.
+  final Set<String> _thumbnailRefreshed = <String>{};
+
+  /// Views with a capture in flight, so one slow screenshot is not queued twice.
+  final Set<int> _thumbnailInFlight = <int>{};
 
   BrowserTab? get _active =>
       _activeIndex >= 0 && _activeIndex < _tabs.length ? _tabs[_activeIndex] : null;
@@ -223,6 +231,71 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _navigate(url);
   }
 
+  // ------------------------------------------------------------- previews
+
+  /// Refreshes the tile preview of a bookmarked page once it has been shown.
+  ///
+  /// A bookmark is added from the settings screen, where there is no page to
+  /// photograph, so the cover is captured the first time the page is actually
+  /// opened in the browser — or refreshed on the next run when the page is
+  /// opened again. The home page then shows the real page instead of the
+  /// generated monogram.
+  void _maybeRefreshPreview(BrowserTab tab) {
+    final state = _state;
+    if (state == null || tab != _active) return;
+    if (tab.blocked != null || tab.url == UrlResolver.homeUrl) return;
+    final bookmark = state.bookmarkFor(tab.url);
+    if (bookmark == null) return;
+    if (!_thumbnailRefreshed.add(bookmark.id)) return;
+    unawaited(_capturePreview(tab, bookmark));
+  }
+
+  /// The ⋮ menu action: force a fresh screenshot of the current page.
+  Future<void> _refreshActivePreview() async {
+    final state = _state;
+    final tab = _active;
+    if (state == null || tab == null) return;
+    final bookmark = state.bookmarkFor(tab.url);
+    if (bookmark == null) {
+      _snack('这个页面还没有加入书签');
+      return;
+    }
+    _thumbnailRefreshed.add(bookmark.id);
+    final updated = await _capturePreview(tab, bookmark);
+    if (!mounted) return;
+    _snack(updated
+        ? '已更新「${bookmark.displayTitle}」的预览图'
+        : '暂时截不到图，请等页面显示完整后再试');
+  }
+
+  /// Screenshots [tab] and stores the result as [bookmark]'s preview.
+  ///
+  /// Returns false when there was nothing to capture (blank frame, view not
+  /// ready, page navigated away): a failed capture must never replace a good
+  /// preview, so nothing is written in that case.
+  Future<bool> _capturePreview(BrowserTab tab, Bookmark bookmark) async {
+    final state = _state;
+    if (state == null) return false;
+    if (!_thumbnailInFlight.add(tab.viewId)) return false;
+    try {
+      // Give the page a moment to finish painting: pageFinished fires while the
+      // first frame can still be empty.
+      await Future<void>.delayed(const Duration(milliseconds: 900));
+      if (!mounted || tab.blocked != null || tab.url == UrlResolver.homeUrl) {
+        return false;
+      }
+      final bytes = await BrowserBridge.captureThumbnail(tab.viewId, maxWidth: 480);
+      if (bytes == null || bytes.isEmpty || !mounted) return false;
+      // The tab may have navigated on while the capture was in flight.
+      final current = state.bookmarkFor(tab.url);
+      if (current == null || current.id != bookmark.id) return false;
+      await state.setBookmarkThumbnail(current, bytes);
+      return true;
+    } finally {
+      _thumbnailInFlight.remove(tab.viewId);
+    }
+  }
+
   // ------------------------------------------------------------- events
 
   void _onNativeEvent(BrowserEvent event) {
@@ -249,6 +322,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
           tab?.url = event.url;
           if (event.title.isNotEmpty) tab?.title = event.title;
         });
+        if (tab != null) _maybeRefreshPreview(tab);
       case 'progress':
         setState(() => tab?.progress = event.progress);
       case 'titleChanged':
@@ -325,6 +399,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 }
               },
               onHome: () => _navigate(_homeUrl),
+              onRefreshPreview: tab != null &&
+                      tab.blocked == null &&
+                      tab.url != UrlResolver.homeUrl &&
+                      state.isBookmarked(tab.url)
+                  ? _refreshActivePreview
+                  : null,
               onOpenFile: _openLocalFile,
               onRules: () => Navigator.of(context).push(
                 MaterialPageRoute<void>(builder: (_) => const RulesScreen()),
@@ -410,6 +490,7 @@ class _BrowserTopBar extends StatelessWidget {
     required this.onForward,
     required this.onReload,
     required this.onHome,
+    required this.onRefreshPreview,
     required this.onOpenFile,
     required this.onRules,
     required this.onTester,
@@ -427,6 +508,10 @@ class _BrowserTopBar extends StatelessWidget {
   final VoidCallback onForward;
   final VoidCallback onReload;
   final VoidCallback onHome;
+
+  /// Null unless the current page belongs to a bookmark (nothing to refresh).
+  final Future<void> Function()? onRefreshPreview;
+
   final VoidCallback onOpenFile;
   final VoidCallback onRules;
   final VoidCallback onTester;
@@ -557,10 +642,12 @@ class _BrowserTopBar extends StatelessWidget {
                   onLog();
                 case 'file':
                   onOpenFile();
+                case 'preview':
+                  onRefreshPreview?.call();
               }
             },
-            itemBuilder: (context) => const [
-              PopupMenuItem(
+            itemBuilder: (context) => [
+              const PopupMenuItem(
                 value: 'settings',
                 child: Row(
                   children: [
@@ -570,11 +657,16 @@ class _BrowserTopBar extends StatelessWidget {
                   ],
                 ),
               ),
-              PopupMenuDivider(),
-              PopupMenuItem(value: 'rules', child: Text('黑白名单')),
-              PopupMenuItem(value: 'tester', child: Text('策略测试器')),
-              PopupMenuItem(value: 'log', child: Text('访问日志')),
-              PopupMenuItem(value: 'file', child: Text('打开本地网页')),
+              const PopupMenuDivider(),
+              const PopupMenuItem(value: 'rules', child: Text('黑白名单')),
+              const PopupMenuItem(value: 'tester', child: Text('策略测试器')),
+              const PopupMenuItem(value: 'log', child: Text('访问日志')),
+              const PopupMenuItem(value: 'file', child: Text('打开本地网页')),
+              if (onRefreshPreview != null)
+                const PopupMenuItem(
+                  value: 'preview',
+                  child: Text('更新当前页预览图'),
+                ),
             ],
           ),
         ],

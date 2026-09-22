@@ -234,6 +234,9 @@ class BookmarkStore {
 
   Directory get thumbnailDirectory => Directory('${directory.path}/thumbnails');
 
+  /// Makes every capture's file name unique even within the same microsecond.
+  int _thumbnailSequence = 0;
+
   Future<BookmarkLibrary> load() async {
     try {
       if (!await _file.exists()) return BookmarkLibrary.empty;
@@ -275,11 +278,18 @@ class BookmarkStore {
   }
 
   /// Writes a screenshot next to the bookmark and returns its path.
+  ///
+  /// Every capture gets a **fresh file name**: the tile renders the picture
+  /// through `Image.file`, whose cache is keyed by path, so rewriting the same
+  /// path would keep showing the old preview. Callers replace the bookmark's
+  /// `thumbnailPath` and delete the file it pointed at before.
   Future<String?> writeThumbnail(String bookmarkId, Uint8List bytes) async {
     if (bytes.isEmpty) return null;
     try {
       await thumbnailDirectory.create(recursive: true);
-      final file = File('${thumbnailDirectory.path}/$bookmarkId.png');
+      final stamp = '${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}'
+          '${(_thumbnailSequence++).toRadixString(36)}';
+      final file = File('${thumbnailDirectory.path}/$bookmarkId-$stamp.png');
       await file.writeAsBytes(bytes, flush: true);
       return file.path;
     } catch (_) {
