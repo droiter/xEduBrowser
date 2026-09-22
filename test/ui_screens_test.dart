@@ -75,13 +75,16 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('start view summarises the active policy', (tester) async {
-    await pump(tester, StartView(onNavigate: (_) {}, onOpenLocalFile: () {}));
+  testWidgets('the start view is a bare bookmark wall with no controls',
+      (tester) async {
+    await pump(tester, StartView(onNavigate: (_) {}));
 
-    expect(find.text('起始页'), findsOneWidget);
-    expect(find.text('策略已启用'), findsOneWidget);
-    expect(find.text('2 条'), findsWidgets); // two whitelist entries
-    expect(find.textContaining('白名单'), findsWidgets);
+    // Nothing to open yet, so it explains where bookmarks are added — without
+    // offering a button of its own.
+    expect(find.text('还没有书签'), findsOneWidget);
+    expect(find.textContaining('设置'), findsWidgets);
+    expect(find.byType(FilledButton), findsNothing);
+    expect(find.byType(OutlinedButton), findsNothing);
   });
 
   testWidgets('rules screen lists both lists and flags shadowed rules', (tester) async {

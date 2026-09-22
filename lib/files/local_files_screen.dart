@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../browser/browser_bridge.dart';
 import '../state/app_scope.dart';
 import '../ui/theme.dart';
+import 'local_file_url.dart';
 
 /// 与原生通信的通道（由浏览器外壳实现），用于打开系统的存储权限页面。
 const MethodChannel _commands = MethodChannel('tablet_browser/commands');
@@ -147,16 +148,9 @@ class _LocalFilesScreenState extends State<LocalFilesScreen> {
     return index < 0 ? path : path.substring(index + 1);
   }
 
-  /// 生成 `file://` 网址；仅当路径含空格等特殊字符时才做百分号编码，
-  /// 其余情况保持原样，便于与手写的规则文本对照。
-  static String fileUrlOf(String path) {
-    final bool needsEncoding = path.contains(' ') ||
-        path.contains('#') ||
-        path.contains('?') ||
-        path.contains('%');
-    if (!needsEncoding) return 'file://$path';
-    return 'file://${path.split('/').map(Uri.encodeComponent).join('/')}';
-  }
+  /// 生成 `file://` 网址；百分号编码交给 [LocalFileUrl] 统一处理，
+  /// 保证书签、白名单规则与 WebView 实际加载的地址逐字符一致。
+  static String fileUrlOf(String path) => LocalFileUrl.canonical(path);
 
   void _openDirectory(String path) {
     FocusScope.of(context).unfocus();

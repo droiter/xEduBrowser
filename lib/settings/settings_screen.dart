@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../bookmarks/bookmark_manager.dart';
 import '../files/local_files_screen.dart';
 import '../parental/parental_challenge.dart';
 import '../parental/parental_gate.dart';
@@ -135,6 +136,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final bool wide = AppTheme.isWide(context);
 
     final List<Widget> left = <Widget>[
+      // Bookmarks are added here, not on the home page: the home page is the
+      // wall of tiles and nothing else.
+      const BookmarkManagerCard(),
+      const SizedBox(height: 16),
       _webViewCard(settings),
       const SizedBox(height: 16),
       _zoomCard(settings),
@@ -346,7 +351,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _bookmarkCard(AppSettings settings) {
     return SectionCard(
-      title: '书签',
+      title: '书签默认行为',
       subtitle: '收藏常用地址时的默认行为。',
       icon: Icons.bookmark_outline,
       children: <Widget>[
@@ -356,7 +361,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           onChanged: (bool value) =>
               _apply((AppSettings current) => current.copyWith(bookmarkWhitelistByDefault: value)),
           title: const Text('添加书签时默认加入白名单'),
-          subtitle: const Text('收藏一个网址时，同时把它的地址加进白名单，过滤规则默认放行这个网址。'),
+          subtitle: const Text('添加书签时，同时把它的地址和它所在的网站（本地网页是所在目录）'
+              '加进白名单，过滤规则默认放行。'),
         ),
         const HintText(
           '关闭后书签只保存地址，不再改动白名单；已有的白名单规则不会因此被删除。',

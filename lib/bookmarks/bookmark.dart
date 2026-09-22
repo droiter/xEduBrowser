@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import '../files/local_file_url.dart';
 import '../policy/policy_config.dart';
 
 /// The pseudo-category every bookmark starts in. Never stored as a real
@@ -37,9 +38,11 @@ class BookmarkCategory {
 
 /// A bookmark shown as a square tile (thumbnail above, title below).
 ///
-/// A bookmark optionally owns the whitelist entry it created, so that removing
-/// the bookmark can also drop the permission it granted instead of leaving a
-/// stale rule behind.
+/// A bookmark optionally owns the whitelist entries it created, so that
+/// removing the bookmark can also drop the permission it granted instead of
+/// leaving a stale rule behind. There is normally more than one: the
+/// bookmarked address itself **and** the site (or local folder) that contains
+/// it, which is what makes a bookmarked page actually render.
 class Bookmark {
   final String id;
   final String url;
@@ -51,9 +54,9 @@ class Bookmark {
 
   final DateTime createdAt;
 
-  /// The normalised whitelist pattern added for this bookmark, when the user
-  /// chose to add one. Null means the bookmark grants nothing.
-  final String? whitelistPattern;
+  /// The normalised whitelist patterns added for this bookmark, in the order
+  /// they were granted. Empty means the bookmark grants nothing.
+  final List<String> whitelistPatterns;
 
   /// Category this bookmark belongs to, or [uncategorizedId].
   final String categoryId;
@@ -67,10 +70,16 @@ class Bookmark {
     required this.title,
     this.thumbnailPath,
     required this.createdAt,
-    this.whitelistPattern,
+    this.whitelistPatterns = const [],
     this.categoryId = uncategorizedId,
     this.order = 0,
   });
+
+  /// The bookmark's own URL prefix rule — the first pattern it granted, or null
+  /// when it granted nothing. Kept as a convenience for the tile badge and for
+  /// reading older data.
+  String? get whitelistPattern =>
+      whitelistPatterns.isEmpty ? null : whitelistPatterns.first;
 
   bool get isUncategorized => categoryId == uncategorizedId;
 
@@ -119,7 +128,7 @@ class Bookmark {
     String? title,
     String? thumbnailPath,
     bool clearThumbnail = false,
-    String? whitelistPattern,
+    List<String>? whitelistPatterns,
     bool clearWhitelistPattern = false,
     String? categoryId,
     int? order,
@@ -130,8 +139,9 @@ class Bookmark {
         title: title ?? this.title,
         thumbnailPath: clearThumbnail ? null : (thumbnailPath ?? this.thumbnailPath),
         createdAt: createdAt,
-        whitelistPattern:
-            clearWhitelistPattern ? null : (whitelistPattern ?? this.whitelistPattern),
+        whitelistPatterns: clearWhitelistPattern
+            ? const []
+            : (whitelistPatterns ?? this.whitelistPatterns),
         categoryId: categoryId ?? this.categoryId,
         order: order ?? this.order,
       );
@@ -142,21 +152,33 @@ class Bookmark {
         'title': title,
         if (thumbnailPath != null) 'thumbnailPath': thumbnailPath,
         'createdAt': createdAt.toIso8601String(),
-        if (whitelistPattern != null) 'whitelistPattern': whitelistPattern,
+        // Both keys are written: `whitelistPattern` keeps the file readable by
+        // older builds, `whitelistPatterns` carries the full grant.
+        if (whitelistPatterns.isNotEmpty) 'whitelistPattern': whitelistPatterns.first,
+        if (whitelistPatterns.isNotEmpty) 'whitelistPatterns': whitelistPatterns,
         if (categoryId.isNotEmpty) 'categoryId': categoryId,
         'order': order,
       };
 
-  factory Bookmark.fromJson(Map<String, dynamic> json) => Bookmark(
-        id: json['id'] as String? ?? '',
-        url: json['url'] as String? ?? '',
-        title: json['title'] as String? ?? '',
-        thumbnailPath: json['thumbnailPath'] as String?,
-        createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '') ?? DateTime.now(),
-        whitelistPattern: json['whitelistPattern'] as String?,
-        categoryId: json['categoryId'] as String? ?? uncategorizedId,
-        order: (json['order'] as num?)?.toInt() ?? 0,
-      );
+  factory Bookmark.fromJson(Map<String, dynamic> json) {
+    final listed = [
+      for (final raw in (json['whitelistPatterns'] as List? ?? const []))
+        if (raw is String && raw.trim().isNotEmpty) raw.trim(),
+    ];
+    final single = json['whitelistPattern'] as String?;
+    return Bookmark(
+      id: json['id'] as String? ?? '',
+      url: json['url'] as String? ?? '',
+      title: json['title'] as String? ?? '',
+      thumbnailPath: json['thumbnailPath'] as String?,
+      createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '') ?? DateTime.now(),
+      whitelistPatterns: listed.isNotEmpty
+          ? listed
+          : (single != null && single.trim().isNotEmpty ? [single.trim()] : const []),
+      categoryId: json['categoryId'] as String? ?? uncategorizedId,
+      order: (json['order'] as num?)?.toInt() ?? 0,
+    );
+  }
 }
 
 /// Everything in `bookmarks.json`.
@@ -300,13 +322,30 @@ class BookmarkStore {
 
 /// Builds the whitelist pattern a bookmark should grant.
 abstract final class BookmarkWhitelist {
+  /// Everything a bookmark grants: its **own URL** first, then the **site (or
+  /// local folder) that contains it**.
+  ///
+  /// The requirement is "把 url 及包含该 url 的网站都加入白名单": the exact
+  /// address alone is not enough in practice, because a page pulls its styles,
+  /// scripts and images from elsewhere on the same site — and a local page
+  /// pulls them from its own folder. Duplicates (a URL that already *is* its
+  /// site, or a file directly in a storage root) collapse into one rule.
+  static List<String> grantPatterns(String url) {
+    final own = urlPattern(url);
+    if (own.isEmpty) return const [];
+    final site = sitePattern(url);
+    if (site.isEmpty || site == own) return [own];
+    return [own, site];
+  }
+
   /// The bookmark's own URL as a prefix rule — the default, and what
   /// "书签网址缺省进入白名单" asks for.
-  static String urlPattern(String url) => PatternNormalizer.normalizeRulePattern(url);
+  static String urlPattern(String url) =>
+      PatternNormalizer.normalizeRulePattern(_canonicalLocal(url));
 
   /// The whole site: scheme + host, so sibling paths work too.
   static String sitePattern(String url) {
-    final normalized = PatternNormalizer.normalizeUrl(url);
+    final normalized = PatternNormalizer.normalizeUrl(_canonicalLocal(url));
     final uri = Uri.tryParse(normalized);
     if (uri == null) return urlPattern(url);
     if (uri.scheme == 'file') {
@@ -333,7 +372,17 @@ abstract final class BookmarkWhitelist {
     final trimmed = directoryPath.endsWith('/')
         ? directoryPath.substring(0, directoryPath.length - 1)
         : directoryPath;
-    return 'file://$trimmed/';
+    return LocalFileUrl.directoryPattern(trimmed);
+  }
+
+  /// Percent-encodes a `file://` URL or absolute path, leaving remote URLs and
+  /// rule text untouched. See [LocalFileUrl].
+  static String _canonicalLocal(String url) {
+    final trimmed = url.trim();
+    if (LocalFileUrl.isFileUrl(trimmed) || trimmed.startsWith('/')) {
+      return LocalFileUrl.canonical(trimmed);
+    }
+    return url;
   }
 
   /// Whether granting [url]'s "whole site" actually widens the rule beyond the

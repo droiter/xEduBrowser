@@ -114,6 +114,33 @@ void main() {
       expect(state.policy.rules, isEmpty);
     });
 
+    test('a hand-typed local rule is stored percent-encoded', () async {
+      final state = buildState();
+      await state.addRule(
+        const PolicyRule(pattern: 'file:///sdcard/课件/', kind: PolicyListKind.whitelist),
+      );
+
+      // Encoded, so it matches the URL the WebView reports for that folder.
+      expect(state.policy.rules.single.pattern,
+          'file:///sdcard/%E8%AF%BE%E4%BB%B6/');
+      expect(
+        state.engine.decide('file:///sdcard/%E8%AF%BE%E4%BB%B6/1.html').allowed,
+        isTrue,
+      );
+    });
+
+    test('a wildcard local rule keeps its pattern language', () {
+      expect(
+        AppState.canonicalizeRulePattern('file:///sdcard/课件/*/index.html'),
+        'file:///sdcard/%E8%AF%BE%E4%BB%B6/*/index.html',
+      );
+      // A `?` is left alone: it may be a wildcard, not a query separator.
+      expect(
+        AppState.canonicalizeRulePattern('file:///sdcard/课?/index.html'),
+        'file:///sdcard/课?/index.html',
+      );
+    });
+
     test('removing a rule rebuilds the engine and persists', () async {
       final state = buildState();
       await state.addRule(

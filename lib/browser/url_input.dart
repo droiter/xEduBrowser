@@ -2,6 +2,10 @@
 ///
 /// Deliberately has no search-engine fallback: this is a managed browser, and
 /// silently sending typed text to a third party would defeat the filtering.
+library;
+
+import '../files/local_file_url.dart';
+
 class ResolvedInput {
   final String url;
   final String? error;
@@ -33,12 +37,12 @@ abstract final class UrlResolver {
     // A file URL inside the served root is better reached over loopback, so
     // that local dynamic pages keep working.
     if (text.startsWith('file://')) {
-      final served = localServerUrlFor(
-        Uri.decodeComponent(text.substring('file://'.length)),
-        base: localServerBase,
-        root: localRoot,
-      );
-      return ResolvedInput(served ?? text, isLocalFile: true);
+      final canonical = LocalFileUrl.canonical(text);
+      final path = LocalFileUrl.pathOf(canonical);
+      final served = path == null
+          ? null
+          : localServerUrlFor(path, base: localServerBase, root: localRoot);
+      return ResolvedInput(served ?? canonical, isLocalFile: true);
     }
 
     if (text.contains('://')) return ResolvedInput(text);
@@ -46,7 +50,7 @@ abstract final class UrlResolver {
     // Absolute filesystem path.
     if (text.startsWith('/')) {
       final served = localServerUrlFor(text, base: localServerBase, root: localRoot);
-      return ResolvedInput(served ?? 'file://$text', isLocalFile: true);
+      return ResolvedInput(served ?? LocalFileUrl.canonical(text), isLocalFile: true);
     }
 
     // A bare "host", "host:port" or "host/path".

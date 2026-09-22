@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import '../bookmarks/bookmark.dart';
 import '../bookmarks/bookmark_import.dart';
+import '../files/local_file_url.dart';
 import '../local_server/local_http_server.dart';
 import '../parental/parental_challenge.dart';
 import '../parental/parental_password.dart';
@@ -390,7 +391,84 @@ class AppState extends ChangeNotifier {
     if (_settings.localServerEnabled) {
       await startLocalServer();
     }
+    await _migrateLocalUrls();
     notifyListeners();
+  }
+
+  /// Rewrites stored loopback URLs to the `file://` form the policy matches.
+  ///
+  /// An older build bookmarked a locally served page as
+  /// `http://127.0.0.1:<port>/…` and granted a whitelist rule in that spelling,
+  /// while the local server and the native engine both judge such a request as
+  /// the `file://` address it stands for. The rule therefore never matched and
+  /// the bookmark opened blocked. Existing installs only recover if the stored
+  /// data is fixed, so this runs once at startup (and is a no-op afterwards).
+  ///
+  /// The port is deliberately ignored: the app's own server is the only source
+  /// of loopback URLs here, and its port changes between runs whenever 8787 was
+  /// taken. This mirrors the assumption `AppState.policyUrl` makes everywhere
+  /// else.
+  Future<void> _migrateLocalUrls() async {
+    final root = effectiveLocalRoot;
+    if (root.isEmpty) return;
+
+    var policyChanged = false;
+    final rules = <PolicyRule>[];
+    final seenRules = <String>{};
+    for (final rule in _policy.rules) {
+      final pattern = rule.kind == PolicyListKind.whitelist
+          ? _loopbackToFilePattern(rule.pattern, root) ?? rule.pattern
+          : rule.pattern;
+      if (pattern != rule.pattern) policyChanged = true;
+      final key = '${rule.kind.wire}\u0000${PatternNormalizer.normalizeRulePattern(pattern)}';
+      if (!seenRules.add(key)) {
+        // The rewrite collapsed two spellings of the same rule into one.
+        policyChanged = true;
+        continue;
+      }
+      rules.add(pattern == rule.pattern ? rule : rule.copyWith(pattern: pattern));
+    }
+
+    var bookmarksChanged = false;
+    final bookmarks = <Bookmark>[];
+    for (final bookmark in _library.bookmarks) {
+      final url = mapAnyLoopbackToFileUrl(bookmark.url, root) ?? bookmark.url;
+      final patterns = [
+        for (final pattern in bookmark.whitelistPatterns)
+          _loopbackToFilePattern(pattern, root) ?? pattern,
+      ];
+      final changed = url != bookmark.url ||
+          !listEquals(patterns, bookmark.whitelistPatterns);
+      if (changed) bookmarksChanged = true;
+      bookmarks.add(changed
+          ? bookmark.copyWith(
+              url: url,
+              whitelistPatterns: patterns,
+              clearWhitelistPattern: patterns.isEmpty,
+            )
+          : bookmark);
+    }
+
+    if (bookmarksChanged) {
+      _library = BookmarkLibrary(categories: _library.categories, bookmarks: bookmarks);
+      await _persistBookmarks();
+    }
+    if (policyChanged) {
+      await updatePolicy(_policy.copyWith(rules: rules));
+    }
+  }
+
+  /// Maps a whitelist pattern written as a loopback URL onto its file form.
+  /// Wildcards are left alone: they are rule language, not an address.
+  static String? _loopbackToFilePattern(String pattern, String root) {
+    if (pattern.contains('*')) return null;
+    if (!pattern.startsWith('http://127.0.0.1') &&
+        !pattern.startsWith('http://localhost') &&
+        !pattern.startsWith('https://127.0.0.1') &&
+        !pattern.startsWith('https://localhost')) {
+      return null;
+    }
+    return mapAnyLoopbackToFileUrl(pattern, root);
   }
 
   Future<void> updatePolicy(PolicyConfig next) async {
@@ -422,6 +500,30 @@ class AppState extends ChangeNotifier {
 
   // ------------------------------------------------------------ bookmarks
 
+  /// The form of [url] the policy must judge.
+  ///
+  /// A page served by the built-in loopback server is evaluated as the
+  /// `file://` address it represents — the local HTTP server and the native
+  /// engine both map it that way — so bookmarks and whitelist rules are stored
+  /// in that same form. A bookmark of a locally served page that kept the
+  /// `http://127.0.0.1:<port>/…` spelling granted a rule which never matched
+  /// what was actually checked, and the page opened blocked.
+  ///
+  /// Local paths are canonicalised (percent-encoded) for the same reason: the
+  /// WebView reports an encoded address, and the filter compares strings.
+  String policyUrl(String url) {
+    final trimmed = url.trim();
+    if (trimmed.isEmpty || trimmed.startsWith('about:')) return trimmed;
+    final normalized = PatternNormalizer.normalizeUrl(trimmed);
+    final mapped = mapLoopbackToFileUrl(normalized, localServerDescriptor(_localServer)) ??
+        mapAnyLoopbackToFileUrl(normalized, effectiveLocalRoot);
+    final resolved = mapped ?? normalized;
+    return resolved.startsWith('file://') ? LocalFileUrl.canonical(resolved) : resolved;
+  }
+
+  /// Decides [url] exactly the way the native engine and the local server do.
+  PolicyDecision decideUrl(String url) => _engine.decide(policyUrl(url));
+
   Bookmark? _bookmarkByUrl(String normalizedUrl) {
     for (final bookmark in _library.bookmarks) {
       if (bookmark.url == normalizedUrl) return bookmark;
@@ -429,7 +531,7 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
-  Bookmark? bookmarkFor(String url) => _bookmarkByUrl(PatternNormalizer.normalizeUrl(url));
+  Bookmark? bookmarkFor(String url) => _bookmarkByUrl(policyUrl(url));
 
   bool isBookmarked(String url) => bookmarkFor(url) != null;
 
@@ -439,19 +541,18 @@ class AppState extends ChangeNotifier {
 
   /// Adds (or updates) a bookmark.
   ///
-  /// By default the bookmark's URL is also added to the whitelist, which is the
-  /// behaviour the requirement asks for: bookmarking a page is how you grant
-  /// access to it. Pass [addToWhitelist] to override, and [wholeSite] to grant
-  /// the origin instead of the exact URL prefix.
+  /// By default the bookmark's URL **and the site (or local folder) containing
+  /// it** both join the whitelist: the exact address alone is not enough, since
+  /// a page pulls its styles, scripts and images from elsewhere on the same
+  /// site. Pass [addToWhitelist] to override.
   Future<Bookmark> addBookmark({
     required String url,
     String title = '',
     Uint8List? thumbnail,
     bool? addToWhitelist,
-    bool wholeSite = false,
     String categoryId = uncategorizedId,
   }) async {
-    final normalizedUrl = PatternNormalizer.normalizeUrl(url);
+    final normalizedUrl = policyUrl(url);
     final existing = _bookmarkByUrl(normalizedUrl);
     final id = existing?.id ?? _newBookmarkId();
 
@@ -460,19 +561,10 @@ class AppState extends ChangeNotifier {
       thumbnailPath = await bookmarkStore.writeThumbnail(id, thumbnail) ?? thumbnailPath;
     }
 
-    var whitelistPattern = existing?.whitelistPattern;
+    var whitelistPatterns = existing?.whitelistPatterns ?? const <String>[];
     final shouldWhitelist = addToWhitelist ?? _settings.bookmarkWhitelistByDefault;
     if (shouldWhitelist) {
-      final raw = wholeSite
-          ? BookmarkWhitelist.sitePattern(normalizedUrl)
-          : BookmarkWhitelist.urlPattern(normalizedUrl);
-      final pattern = PatternNormalizer.normalizeRulePattern(raw);
-      await addRule(PolicyRule(
-        pattern: pattern,
-        kind: PolicyListKind.whitelist,
-        note: '书签：${title.trim().isEmpty ? normalizedUrl : title.trim()}',
-      ));
-      whitelistPattern = pattern;
+      whitelistPatterns = await _grantWhitelist(normalizedUrl, title);
     }
 
     final bookmark = Bookmark(
@@ -481,7 +573,7 @@ class AppState extends ChangeNotifier {
       title: title.trim(),
       thumbnailPath: thumbnailPath,
       createdAt: existing?.createdAt ?? DateTime.now(),
-      whitelistPattern: whitelistPattern,
+      whitelistPatterns: whitelistPatterns,
       categoryId: categoryId,
       // Appended to the end of its category, unless it already had a slot.
       order: existing != null && existing.categoryId == categoryId
@@ -501,16 +593,32 @@ class AppState extends ChangeNotifier {
     return bookmark;
   }
 
-  /// Removes a bookmark, and by default the whitelist entry it created.
+  /// Adds every rule a bookmark grants — its own URL and the site/folder that
+  /// contains it — and returns the patterns in grant order.
+  Future<List<String>> _grantWhitelist(String url, String title) async {
+    final patterns = BookmarkWhitelist.grantPatterns(url);
+    final note = '书签：${title.trim().isEmpty ? url : title.trim()}';
+    for (final pattern in patterns) {
+      if (pattern.isEmpty) continue;
+      await addRule(PolicyRule(
+        pattern: pattern,
+        kind: PolicyListKind.whitelist,
+        note: note,
+      ));
+    }
+    return patterns;
+  }
+
+  /// Removes a bookmark, and by default the whitelist entries it created.
   ///
-  /// The rule is kept when another bookmark still relies on the same pattern,
-  /// so deleting one bookmark can never silently revoke access granted for
+  /// A rule is kept when another bookmark still relies on the same pattern, so
+  /// deleting one bookmark can never silently revoke access granted for
   /// another.
   Future<void> removeBookmark(
     Bookmark bookmark, {
     bool removeWhitelistRule = true,
   }) async {
-    final pattern = bookmark.whitelistPattern;
+    final patterns = bookmark.whitelistPatterns;
     _library = BookmarkLibrary(
       categories: _library.categories,
       bookmarks: [
@@ -520,49 +628,45 @@ class AppState extends ChangeNotifier {
     );
     await bookmarkStore.deleteThumbnail(bookmark.thumbnailPath);
 
-    if (removeWhitelistRule && pattern != null) {
-      await _removeWhitelistRuleIfUnused(pattern);
+    if (removeWhitelistRule) {
+      for (final pattern in patterns) {
+        await _removeWhitelistRuleIfUnused(pattern);
+      }
     }
 
     notifyListeners();
     await _persistBookmarks();
   }
 
-  /// Renames a bookmark and reconciles the whitelist entry it grants.
+  /// Renames a bookmark and reconciles the whitelist entries it grants.
   Future<void> editBookmark(
     Bookmark bookmark, {
     required String title,
     required bool grantWhitelist,
-    bool wholeSite = false,
   }) async {
-    var pattern = bookmark.whitelistPattern;
+    final url = policyUrl(bookmark.url);
+    var patterns = bookmark.whitelistPatterns;
 
     if (grantWhitelist) {
-      final raw = wholeSite
-          ? BookmarkWhitelist.sitePattern(bookmark.url)
-          : BookmarkWhitelist.urlPattern(bookmark.url);
-      final normalized = PatternNormalizer.normalizeRulePattern(raw);
-      if (pattern != normalized) {
-        // Drop a stale rule first, for example when switching to whole-site.
-        if (pattern != null) {
-          await _removeWhitelistRuleIfUnused(pattern, exceptBookmarkId: bookmark.id);
-        }
-        await addRule(PolicyRule(
-          pattern: normalized,
-          kind: PolicyListKind.whitelist,
-          note: '书签：${title.trim().isEmpty ? bookmark.url : title.trim()}',
-        ));
-        pattern = normalized;
+      final wanted = BookmarkWhitelist.grantPatterns(url);
+      // Drop a stale rule first, for example one written in the old loopback
+      // spelling or a folder scope the user no longer wants.
+      for (final stale in patterns.where((p) => !wanted.contains(p))) {
+        await _removeWhitelistRuleIfUnused(stale, exceptBookmarkId: bookmark.id);
       }
-    } else if (pattern != null) {
-      await _removeWhitelistRuleIfUnused(pattern, exceptBookmarkId: bookmark.id);
-      pattern = null;
+      patterns = await _grantWhitelist(url, title);
+    } else if (patterns.isNotEmpty) {
+      for (final stale in patterns) {
+        await _removeWhitelistRuleIfUnused(stale, exceptBookmarkId: bookmark.id);
+      }
+      patterns = const [];
     }
 
     await updateBookmark(bookmark.copyWith(
+      url: url,
       title: title.trim(),
-      whitelistPattern: pattern,
-      clearWhitelistPattern: pattern == null,
+      whitelistPatterns: patterns,
+      clearWhitelistPattern: patterns.isEmpty,
     ));
   }
 
@@ -576,7 +680,7 @@ class AppState extends ChangeNotifier {
     String? exceptBookmarkId,
   }) async {
     if (_library.bookmarks.any(
-      (b) => b.whitelistPattern == pattern && b.id != exceptBookmarkId,
+      (b) => b.whitelistPatterns.contains(pattern) && b.id != exceptBookmarkId,
     )) {
       return;
     }
@@ -754,14 +858,15 @@ class AppState extends ChangeNotifier {
     var skipped = 0;
 
     for (final candidate in plan.candidates) {
-      if (existingUrls.contains(candidate.url)) {
+      final url = policyUrl(candidate.url);
+      if (existingUrls.contains(url)) {
         skipped++;
         continue;
       }
-      existingUrls.add(candidate.url);
+      existingUrls.add(url);
       added.add(Bookmark(
         id: 'b${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}${added.length}',
-        url: candidate.url,
+        url: url,
         title: candidate.title,
         createdAt: DateTime.now(),
         categoryId: categoryId,
@@ -786,7 +891,7 @@ class AppState extends ChangeNotifier {
       case BookmarkWhitelistScope.perFile:
         for (final candidate in added) {
           await addRule(PolicyRule(
-            pattern: BookmarkWhitelist.urlPattern(candidate.url),
+            pattern: BookmarkWhitelist.urlPattern(policyUrl(candidate.url)),
             kind: PolicyListKind.whitelist,
             note: '本地导入',
           ));
@@ -849,7 +954,7 @@ class AppState extends ChangeNotifier {
   // ---------------------------------------------------------------- rules
 
   Future<void> addRule(PolicyRule rule) async {
-    final normalized = PatternNormalizer.normalizeRulePattern(rule.pattern);
+    final normalized = canonicalizeRulePattern(rule.pattern);
     if (normalized.isEmpty) return;
     final next = [
       for (final existing in _policy.rules)
@@ -859,6 +964,21 @@ class AppState extends ChangeNotifier {
       rule.copyWith(pattern: normalized),
     ];
     await updatePolicy(_policy.copyWith(rules: next));
+  }
+
+  /// Canonicalises a rule that is a plain local address.
+  ///
+  /// `file:///sdcard/课件/` is stored percent-encoded, because that is the URL
+  /// the WebView reports and the filter compares strings. A `*` is preserved
+  /// (it is allowed in a path); a `?` — wildcard or query separator, it cannot
+  /// be told apart — leaves the text untouched. Bookmarks and imports already
+  /// write canonical patterns, so this is about hand-typed entries in the rules
+  /// screen.
+  static String canonicalizeRulePattern(String raw) {
+    final normalized = PatternNormalizer.normalizeRulePattern(raw);
+    if (normalized.isEmpty || !normalized.startsWith('file://')) return normalized;
+    if (normalized.contains('?')) return normalized;
+    return PatternNormalizer.normalizeRulePattern(LocalFileUrl.canonical(normalized));
   }
 
   Future<void> removeRule(PolicyRule rule) async {

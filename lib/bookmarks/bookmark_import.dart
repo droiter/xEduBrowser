@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../files/local_file_url.dart';
+
 /// What to do about the whitelist when importing a directory of local pages.
 enum BookmarkWhitelistScope {
   /// Import bookmarks only; nothing is granted.
@@ -212,16 +214,20 @@ abstract final class BookmarkImporter {
   }
 
   /// A file inside the served root is addressed over loopback so dynamic pages
-  /// keep working; anything else becomes a `file://` URL.
+  /// keep working; anything else becomes a `file://` URL. Local paths are
+  /// canonicalised (percent-encoded) so the stored URL is exactly what the
+  /// WebView loads and the policy compares.
   static String _urlFor(String filePath, String? localServerBase, String? localServerRoot) {
     if (localServerBase != null && localServerRoot != null && localServerRoot.isNotEmpty) {
       final root = _trimSlash(localServerRoot);
       if (filePath.startsWith(root)) {
-        final rest = filePath.substring(root.length);
-        return '$localServerBase${rest.startsWith('/') ? rest : '/$rest'}';
+        // Keep the encoded path of the canonical file URL, so both access
+        // routes name the same resource.
+        final path = Uri.parse(LocalFileUrl.canonical(filePath)).path;
+        return '$localServerBase$path';
       }
     }
-    return 'file://$filePath';
+    return LocalFileUrl.canonical(filePath);
   }
 
   /// Reads `<title>` out of an HTML file, or null when there is none.

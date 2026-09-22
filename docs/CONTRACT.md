@@ -119,6 +119,14 @@ host is `127.0.0.1`/`localhost` and whose port equals
 `file://<rootPath><pathAndQuery>` so that one set of file-path rules governs
 both `file://` browsing and locally served pages.
 
+Dart applies the same mapping (`AppState.policyUrl` / `AppState.decideUrl`,
+`mapLoopbackToFileUrl` in `lib/local_server/local_http_server.dart`) before
+deciding, and stores bookmark URLs and whitelist rules in that `file://` form.
+Local paths are additionally percent-encoded (`lib/files/local_file_url.dart`),
+because the filter compares strings and the WebView reports the encoded address.
+A rule written in the loopback spelling therefore never matches: existing data
+in that form is rewritten to `file://` on startup.
+
 ---
 
 ## 3. Local HTTP server

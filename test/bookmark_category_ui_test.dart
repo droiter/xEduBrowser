@@ -47,7 +47,7 @@ void main() {
             GlobalCupertinoLocalizations.delegate,
           ],
           home: Scaffold(
-            body: StartView(onNavigate: (_) {}, onOpenLocalFile: () {}),
+            body: StartView(onNavigate: (_) {}),
           ),
         ),
       ),
@@ -72,7 +72,6 @@ void main() {
     expect(find.text('数学'), findsOneWidget);
     expect(find.text('科学'), findsOneWidget);
     expect(find.text('日报'), findsOneWidget);
-    expect(find.text('3 个 · 2 个分类'), findsOneWidget);
   });
 
   testWidgets('a bookmark without a category lands in 未分类', (tester) async {
@@ -159,29 +158,6 @@ void main() {
     expect(st.bookmarksIn(newsCategory.id).map((b) => b.title), contains('第一'));
   });
 
-  testWidgets('the tile menu renames a bookmark, updating the caption', (tester) async {
-    await tester.runAsync(() async {
-      await state.addBookmark(url: 'https://school.test/a', title: '旧标题');
-    });
-
-    await pumpHome(tester);
-    expect(find.text('旧标题'), findsOneWidget);
-
-    // Long-press is the drag gesture, so the menu opens from its own button.
-    await tester.tap(find.byTooltip('更多操作').first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('修改标题'));
-    await tester.pumpAndSettle();
-
-    await tester.enterText(find.byType(TextField).last, '新标题');
-    await tester.tap(find.text('保存'));
-    await tester.pumpAndSettle();
-
-    expect(state.bookmarks.single.title, '新标题');
-    expect(find.text('新标题'), findsOneWidget);
-    expect(find.text('旧标题'), findsNothing);
-  });
-
   testWidgets('an empty category is not shown as a section', (tester) async {
     await tester.runAsync(() async {
       await state.addCategory('还没有书签的分类');
@@ -194,36 +170,4 @@ void main() {
     expect(find.text('还没有书签的分类'), findsNothing);
   });
 
-  testWidgets('the ＋ tile adds into the category it belongs to', (tester) async {
-    await tester.runAsync(() async {
-      final category = await state.addCategory('课程');
-      await state.addBookmark(url: 'https://a.test/', title: 'A', categoryId: category.id);
-    });
-
-    final requested = <String>[];
-    tester.view.physicalSize = const Size(1500, 1400);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.reset);
-    await tester.pumpWidget(
-      AppScope(
-        state: state,
-        child: MaterialApp(
-          theme: AppTheme.light,
-          home: Scaffold(
-            body: StartView(
-              onNavigate: (_) {},
-              onOpenLocalFile: () {},
-              onAddBookmark: (categoryId) async => requested.add(categoryId),
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.pump();
-
-    await tester.tap(find.text('添加到课程'));
-    await tester.pump();
-
-    expect(requested, [state.categories.single.id]);
-  });
 }

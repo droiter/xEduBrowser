@@ -9,15 +9,11 @@ class BookmarkEditResult {
   const BookmarkEditResult({
     required this.title,
     required this.grantWhitelist,
-    required this.wholeSite,
     this.categoryId = uncategorizedId,
   });
 
   final String title;
   final bool grantWhitelist;
-
-  /// Grant the whole origin instead of just the bookmarked URL.
-  final bool wholeSite;
 
   /// Category the bookmark should live in.
   final String categoryId;
@@ -26,13 +22,14 @@ class BookmarkEditResult {
 /// Add/edit dialog for a bookmark.
 ///
 /// The whitelist switch is ticked by default, because a bookmarked address is
-/// meant to be reachable — that is the "书签网址缺省进入白名单" behaviour.
+/// meant to be reachable — that is the "书签网址缺省进入白名单" behaviour — and
+/// granting it always covers both the address itself and the site (or local
+/// folder) that contains it.
 Future<BookmarkEditResult?> showBookmarkDialog(
   BuildContext context, {
   required String url,
   String initialTitle = '',
   required bool whitelistDefault,
-  bool grantWholeSiteDefault = false,
   bool isEditing = false,
   String categoryId = uncategorizedId,
 }) =>
@@ -42,7 +39,6 @@ Future<BookmarkEditResult?> showBookmarkDialog(
         url: url,
         initialTitle: initialTitle,
         whitelistDefault: whitelistDefault,
-        grantWholeSiteDefault: grantWholeSiteDefault,
         isEditing: isEditing,
         categoryId: categoryId,
       ),
@@ -94,7 +90,6 @@ class _BookmarkFormDialog extends StatefulWidget {
     required this.url,
     required this.initialTitle,
     required this.whitelistDefault,
-    required this.grantWholeSiteDefault,
     required this.isEditing,
     required this.categoryId,
   });
@@ -102,7 +97,6 @@ class _BookmarkFormDialog extends StatefulWidget {
   final String url;
   final String initialTitle;
   final bool whitelistDefault;
-  final bool grantWholeSiteDefault;
   final bool isEditing;
   final String categoryId;
 
@@ -115,21 +109,14 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
       TextEditingController(text: widget.initialTitle);
   final TextEditingController _newCategory = TextEditingController();
   late bool _grant = widget.whitelistDefault;
-  // A local page cannot render without its sibling assets, so the folder is
-  // pre-selected for file:// bookmarks — otherwise the page loads blank. Files
-  // sitting directly in a storage root are the exception: their "folder" is the
-  // whole device, which is never what the user meant by default.
-  late bool _wholeSite = widget.grantWholeSiteDefault ||
-      (widget.url.startsWith('file://') &&
-          BookmarkWhitelist.wholeSiteWidens(widget.url));
   late String _categoryId = widget.categoryId;
   bool _creatingCategory = false;
 
   static const String _createSentinel = '__create__';
 
-  String get _urlPattern => BookmarkWhitelist.urlPattern(widget.url);
-
-  String get _sitePattern => BookmarkWhitelist.sitePattern(widget.url);
+  /// Every rule the dialog is about to create: the address itself, then the
+  /// site (or local folder) holding it.
+  List<String> get _patterns => BookmarkWhitelist.grantPatterns(widget.url);
 
   bool get _isLocalFile => widget.url.startsWith('file://');
 
@@ -155,7 +142,6 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
     Navigator.of(context).pop(BookmarkEditResult(
       title: _title.text,
       grantWhitelist: _grant,
-      wholeSite: _wholeSite,
       categoryId: categoryId,
     ));
   }
@@ -235,26 +221,24 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
                 title: const Text('加入白名单'),
                 subtitle: Text(
                   _grant
-                      ? '放行范围：${_wholeSite ? _sitePattern : _urlPattern}'
+                      ? '放行范围：${_patterns.join('   +   ')}'
                       : '只收藏，不放行（白名单模式下打开会被拦截）',
                   style: theme.textTheme.bodySmall,
                 ),
               ),
               if (_grant)
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: _wholeSite,
-                  onChanged: (value) => setState(() => _wholeSite = value ?? false),
-                  title: Text(_isLocalFile ? '放行该文件所在目录' : '覆盖整个站点'),
-                  subtitle: Text(
+                Padding(
+                  padding: const EdgeInsets.only(left: 4, top: 4),
+                  child: Text(
                     _isLocalFile
                         ? (BookmarkWhitelist.wholeSiteWidens(widget.url)
-                            ? '强烈建议保持勾选：本地网页的样式、脚本、页面图片都在这个目录里，'
-                                '只放行 .html 文件会让页面显示为空白。范围：$_sitePattern'
+                            ? '本地网页的样式、脚本、页面图片都在同一个目录里，'
+                                '所以除了这个文件本身，还会放行它所在的目录。'
                             : '这个文件就在存储卡根目录下，放行它的目录等于放行整张存储卡，'
-                                '所以只放行该文件：$_urlPattern')
-                        : '打开后该域名的其他页面也可访问：$_sitePattern',
-                    style: theme.textTheme.bodySmall,
+                                '所以只放行该文件本身。')
+                        : '除了这个地址，还会放行它所在的整个网站，'
+                            '页面引用的站内样式、脚本和图片才能加载。',
+                    style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
                   ),
                 ),
             ],
@@ -445,7 +429,7 @@ class _DeleteConfirmDialogState extends State<_DeleteConfirmDialog> {
                 onChanged: (value) => setState(() => _removeRule = value ?? false),
                 title: const Text('同时移除对应的白名单条目'),
                 subtitle: Text(
-                  widget.bookmark.whitelistPattern!,
+                  widget.bookmark.whitelistPatterns.join('\n'),
                   style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
                 ),
               ),

@@ -68,6 +68,87 @@ Future<BookmarkImportOutcome?> showBookmarkImportDialog(
       builder: (context) => _BookmarkImportDialog(directoryPath: directoryPath),
     );
 
+/// The category manager: rename/delete existing categories, create new ones.
+///
+/// Lives here rather than in a screen because both the settings screen (where
+/// bookmarks are managed now) and the import dialog point at it.
+Future<void> showCategoryManagerSheet(BuildContext context) {
+  return showModalBottomSheet<void>(
+    context: context,
+    builder: (sheetContext) {
+      final state = AppScope.read(sheetContext);
+      return SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+              child: Text(
+                '分类管理',
+                style: Theme.of(sheetContext).textTheme.titleMedium,
+              ),
+            ),
+            for (final category in state.categories)
+              ListTile(
+                leading: const Icon(Icons.folder_outlined),
+                title: Text(category.name),
+                subtitle: Text('${state.bookmarksIn(category.id).length} 个书签'),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: '重命名',
+                      icon: const Icon(Icons.edit_outlined),
+                      onPressed: () async {
+                        final name = await showCategoryNameDialog(
+                          sheetContext,
+                          title: '重命名分类',
+                          initialName: category.name,
+                          confirmLabel: '保存',
+                        );
+                        if (name != null) await state.renameCategory(category, name);
+                      },
+                    ),
+                    IconButton(
+                      tooltip: '删除分类',
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: () async {
+                        final confirmed = await confirmCategoryDelete(
+                          sheetContext,
+                          category: category,
+                          bookmarkCount: state.bookmarksIn(category.id).length,
+                        );
+                        if (confirmed == true) await state.removeCategory(category);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.create_new_folder_outlined),
+              title: const Text('新建分类'),
+              onTap: () async {
+                final name = await showCategoryNameDialog(sheetContext, title: '新建分类');
+                if (name != null) await state.addCategory(name);
+              },
+            ),
+            if (state.categories.isEmpty)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 4, 20, 16),
+                child: Text(
+                  '还没有分类。分类用来把书签分组显示在首页，'
+                  '也可以在添加书签或从目录导入时直接新建。',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
 // --------------------------------------------------------------- name dialog
 
 /// The name prompt.

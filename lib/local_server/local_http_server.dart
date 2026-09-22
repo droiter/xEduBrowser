@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import '../files/local_file_url.dart';
 import '../policy/policy_engine.dart';
 
 /// Serves a local directory over `http://127.0.0.1:<port>` so that local
@@ -127,7 +128,13 @@ class LocalHttpServer {
     }
 
     final fullPath = relative.isEmpty ? rootPath : '$rootPath/$relative';
-    final fileUrl = 'file://$fullPath';
+    final query = request.uri.hasQuery ? '?${request.uri.query}' : '';
+    // Local pages are filtered exactly like remote ones. The decision is made
+    // against the *file* URL so that rules written as file paths govern both
+    // `file://` browsing and locally served pages — and it is canonicalised
+    // (percent-encoded) the same way the stored rules and the WebView's own
+    // reporting are, so a path with spaces or Chinese characters still matches.
+    final fileUrl = '${LocalFileUrl.canonical(fullPath)}$query';
 
     // Local pages are filtered exactly like remote ones. The decision is made
     // against the *file* URL so that rules written as file paths govern both
@@ -333,6 +340,23 @@ String? mapLoopbackToFileUrl(String url, Map<String, dynamic> localServer) {
   if (uri == null) return null;
   if (uri.host != '127.0.0.1' && uri.host != 'localhost') return null;
   if (uri.port != port) return null;
+  final trimmedRoot = root.endsWith('/') ? root.substring(0, root.length - 1) : root;
+  final query = uri.hasQuery ? '?${uri.query}' : '';
+  return 'file://$trimmedRoot${uri.path.isEmpty ? '/' : uri.path}$query';
+}
+
+/// Maps a loopback URL onto [rootPath] **whatever port it carries**.
+///
+/// Used when canonicalising stored data: a bookmark or rule written while the
+/// local server ran on a previous port still means "that file under the root",
+/// and the port is different on every install where 8787 was taken.
+String? mapAnyLoopbackToFileUrl(String url, String? rootPath) {
+  final root = rootPath?.trim() ?? '';
+  if (root.isEmpty) return null;
+  final uri = Uri.tryParse(url.trim());
+  if (uri == null) return null;
+  if (uri.host != '127.0.0.1' && uri.host != 'localhost') return null;
+  if (root.contains('*') || root.contains('?')) return null;
   final trimmedRoot = root.endsWith('/') ? root.substring(0, root.length - 1) : root;
   final query = uri.hasQuery ? '?${uri.query}' : '';
   return 'file://$trimmedRoot${uri.path.isEmpty ? '/' : uri.path}$query';

@@ -150,6 +150,32 @@ void main() {
     expect(allowed.status, 200);
   });
 
+  test('serves a path with spaces and Chinese characters when it is whitelisted',
+      () async {
+    await server.start();
+    // A real local page whose name needs percent-encoding — the rule is written
+    // in the canonical encoded form, exactly what a bookmark grants.
+    Directory('${root.path}/课件').createSync();
+    File('${root.path}/课件/第 1 课.html').writeAsStringSync('<h1>第一课</h1>');
+
+    engine = PolicyEngine(PolicyConfig(rules: [
+      // The encoded spelling a bookmark (or the rules screen) writes down.
+      PolicyRule(
+        pattern: 'file://${root.path}/%E8%AF%BE%E4%BB%B6/',
+        kind: PolicyListKind.whitelist,
+      ),
+    ]));
+
+    final allowed = await get('/%E8%AF%BE%E4%BB%B6/%E7%AC%AC%201%20%E8%AF%BE.html');
+    expect(allowed.status, 200,
+        reason: '编码后的路径必须能命中同样编码的白名单规则');
+    expect(allowed.body, contains('第一课'));
+
+    // Anything outside the granted folder is still refused.
+    final denied = await get('/index.html');
+    expect(denied.status, 403);
+  });
+
   test('maps a loopback URL back to the file URL it represents', () async {
     await server.start();
     expect(

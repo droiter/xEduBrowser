@@ -1,203 +1,40 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import 'bookmark.dart';
-import 'bookmark_dialog.dart';
-import 'category_dialogs.dart';
 
 /// The home page bookmark wall: one section per category, each a grid of square
 /// tiles with the title underneath.
 ///
 /// Tiles can be dragged onto one another to change their order inside a
-/// category, and dragged from one category into another.
+/// category, and dragged from one category into another. There is deliberately
+/// no add/delete control here — bookmarks are managed in the settings screen.
 class BookmarkGrid extends StatelessWidget {
-  const BookmarkGrid({
-    super.key,
-    required this.onOpen,
-    this.onAdd,
-    this.onImport,
-    this.onCaptureThumbnail,
-    this.emptyHint = '还没有书签。打开一个网页后点地址栏右侧的 ☆ 即可加入，'
-        '也可以用「添加书签」直接输入网址。',
-  });
+  const BookmarkGrid({super.key, required this.onOpen});
 
+  /// Opens a bookmark's URL through the browser's policy gate.
   final ValueChanged<String> onOpen;
-
-  /// Adds a bookmark into the given category (the ＋ tile of that section).
-  final Future<void> Function(String categoryId)? onAdd;
-
-  /// Imports bookmarks from a local directory.
-  final Future<void> Function()? onImport;
-
-  /// Captures the current page, for the 更新缩略图 menu action.
-  final Future<Uint8List?> Function()? onCaptureThumbnail;
-
-  final String emptyHint;
 
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
-    final theme = Theme.of(context);
     final sections = state.populatedCategoryIds;
-    final total = state.bookmarks.length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Text('书签', style: theme.textTheme.titleSmall),
-            const SizedBox(width: 8),
-            if (total > 0)
-              Text(
-                '$total 个 · ${state.categories.length} 个分类',
-                style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
-              ),
-            const Spacer(),
-            if (state.categories.isNotEmpty || total > 0)
-              TextButton.icon(
-                onPressed: () => _manageCategories(context, state),
-                icon: const Icon(Icons.folder_outlined, size: 18),
-                label: const Text('分类管理'),
-              ),
-            if (onImport != null)
-              TextButton.icon(
-                onPressed: () => onImport!.call(),
-                icon: const Icon(Icons.drive_folder_upload_outlined, size: 18),
-                label: const Text('从目录导入'),
-              ),
-            if (onAdd != null)
-              TextButton.icon(
-                onPressed: () => onAdd!(uncategorizedId),
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('添加书签'),
-              ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        if (sections.isEmpty)
-          _EmptyState(hint: emptyHint, onAdd: onAdd == null ? null : () => onAdd!(uncategorizedId))
-        else
-          for (final categoryId in sections) ...[
-            _CategorySection(
-              state: state,
-              categoryId: categoryId,
-              onOpen: onOpen,
-              onAdd: onAdd,
-              onCaptureThumbnail: onCaptureThumbnail,
-            ),
-            const SizedBox(height: 22),
-          ],
-      ],
-    );
-  }
-
-  Future<void> _manageCategories(BuildContext context, AppState state) async {
-    await showModalBottomSheet<void>(
-      context: context,
-      builder: (sheetContext) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
-              child: Text('分类管理', style: Theme.of(sheetContext).textTheme.titleMedium),
-            ),
-            for (final category in state.categories)
-              ListTile(
-                leading: const Icon(Icons.folder_outlined),
-                title: Text(category.name),
-                subtitle: Text('${state.bookmarksIn(category.id).length} 个书签'),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      tooltip: '重命名',
-                      icon: const Icon(Icons.edit_outlined),
-                      onPressed: () async {
-                        final name = await showCategoryNameDialog(
-                          sheetContext,
-                          title: '重命名分类',
-                          initialName: category.name,
-                          confirmLabel: '保存',
-                        );
-                        if (name != null) await state.renameCategory(category, name);
-                      },
-                    ),
-                    IconButton(
-                      tooltip: '删除分类',
-                      icon: const Icon(Icons.delete_outline),
-                      onPressed: () async {
-                        final confirmed = await confirmCategoryDelete(
-                          sheetContext,
-                          category: category,
-                          bookmarkCount: state.bookmarksIn(category.id).length,
-                        );
-                        if (confirmed == true) await state.removeCategory(category);
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.create_new_folder_outlined),
-              title: const Text('新建分类'),
-              onTap: () async {
-                final name = await showCategoryNameDialog(sheetContext, title: '新建分类');
-                if (name != null) await state.addCategory(name);
-              },
-            ),
-            if (state.categories.isEmpty)
-              const Padding(
-                padding: EdgeInsets.fromLTRB(20, 4, 20, 16),
-                child: Text(
-                  '还没有分类。分类用来把书签分组显示在首页，'
-                  '也可以在添加书签或从目录导入时直接新建。',
-                  style: TextStyle(fontSize: 12),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.hint, this.onAdd});
-
-  final String hint;
-  final VoidCallback? onAdd;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(hint, style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor)),
-          if (onAdd != null) ...[
-            const SizedBox(height: 12),
-            FilledButton.tonalIcon(
-              onPressed: onAdd,
-              icon: const Icon(Icons.add),
-              label: const Text('添加第一个书签'),
-            ),
-          ],
+        for (final categoryId in sections) ...[
+          _CategorySection(
+            state: state,
+            categoryId: categoryId,
+            onOpen: onOpen,
+          ),
+          const SizedBox(height: 22),
         ],
-      ),
+      ],
     );
   }
 }
@@ -208,15 +45,11 @@ class _CategorySection extends StatelessWidget {
     required this.state,
     required this.categoryId,
     required this.onOpen,
-    required this.onAdd,
-    required this.onCaptureThumbnail,
   });
 
   final AppState state;
   final String categoryId;
   final ValueChanged<String> onOpen;
-  final Future<void> Function(String categoryId)? onAdd;
-  final Future<Uint8List?> Function()? onCaptureThumbnail;
 
   @override
   Widget build(BuildContext context) {
@@ -238,31 +71,6 @@ class _CategorySection extends StatelessWidget {
               '${bookmarks.length}',
               style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
             ),
-            if (state.categoryById(categoryId) != null) ...[
-              const SizedBox(width: 4),
-              IconButton(
-                tooltip: '重命名分类',
-                iconSize: 16,
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.edit_outlined),
-                onPressed: () async {
-                  final category = state.categoryById(categoryId);
-                  if (category == null) return;
-                  final name = await showCategoryNameDialog(
-                    context,
-                    title: '重命名分类',
-                    initialName: category.name,
-                    confirmLabel: '保存',
-                  );
-                  if (name != null) await state.renameCategory(category, name);
-                },
-              ),
-            ],
-            const Spacer(),
-            Text(
-              '拖动方块可调整顺序',
-              style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
-            ),
           ],
         ),
         const SizedBox(height: 10),
@@ -276,17 +84,13 @@ class _CategorySection extends StatelessWidget {
             // Taller than wide: the square thumbnail plus its caption below.
             childAspectRatio: 0.76,
           ),
-          itemCount: bookmarks.length + (onAdd == null ? 0 : 1),
+          itemCount: bookmarks.length,
           itemBuilder: (context, index) {
-            if (index >= bookmarks.length) {
-              return _AddTile(categoryLabel: label, onTap: () => onAdd!(categoryId));
-            }
             final bookmark = bookmarks[index];
             return BookmarkTile(
               bookmark: bookmark,
               onOpen: () => onOpen(bookmark.url),
               onReorderOnto: (dragged) => _dropOn(state, dragged, bookmark),
-              onCaptureThumbnail: onCaptureThumbnail,
             );
           },
         ),
@@ -312,13 +116,15 @@ class _CategorySection extends StatelessWidget {
 }
 
 /// One bookmark: square thumbnail, then the title and its folder/host below.
+///
+/// The whole tile opens the bookmark; a long press picks it up for reordering,
+/// which is why the tile carries no button of its own.
 class BookmarkTile extends StatelessWidget {
   const BookmarkTile({
     super.key,
     required this.bookmark,
     required this.onOpen,
     this.onReorderOnto,
-    this.onCaptureThumbnail,
   });
 
   final Bookmark bookmark;
@@ -327,19 +133,10 @@ class BookmarkTile extends StatelessWidget {
   /// Called with the dragged bookmark when another tile is dropped here.
   final Future<void> Function(Bookmark dragged)? onReorderOnto;
 
-  final Future<Uint8List?> Function()? onCaptureThumbnail;
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final visual = _TileBody(
-      bookmark: bookmark,
-      onOpen: onOpen,
-      // Long-press is reserved for reordering, so the menu lives on its own
-      // button instead of competing for the same gesture.
-      onLongPress: null,
-      onMenu: () => _showMenu(context),
-    );
+    final visual = _TileBody(bookmark: bookmark, onOpen: onOpen);
 
     final draggable = LongPressDraggable<Bookmark>(
       data: bookmark,
@@ -353,12 +150,7 @@ class BookmarkTile extends StatelessWidget {
             // explicit one or its Expanded square cannot lay out.
             width: 160,
             height: 160 / 0.76,
-            child: _TileBody(
-              bookmark: bookmark,
-              onOpen: () {},
-              onLongPress: () {},
-              onMenu: () {},
-            ),
+            child: _TileBody(bookmark: bookmark, onOpen: () {}),
           ),
         ),
       ),
@@ -383,106 +175,16 @@ class BookmarkTile extends StatelessWidget {
       ),
     );
   }
-
-  Future<void> _showMenu(BuildContext context) async {
-    final state = AppScope.read(context);
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.open_in_new),
-              title: const Text('打开'),
-              onTap: () => Navigator.of(context).pop('open'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.title),
-              title: const Text('修改标题'),
-              subtitle: Text(bookmark.displayTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
-              onTap: () => Navigator.of(context).pop('rename'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.drive_file_move_outline),
-              title: const Text('移动到分类 / 修改白名单'),
-              onTap: () => Navigator.of(context).pop('edit'),
-            ),
-            if (onCaptureThumbnail != null)
-              ListTile(
-                leading: const Icon(Icons.image_outlined),
-                title: const Text('用当前页面更新缩略图'),
-                onTap: () => Navigator.of(context).pop('thumbnail'),
-              ),
-            ListTile(
-              leading: const Icon(Icons.delete_outline),
-              title: const Text('删除书签'),
-              onTap: () => Navigator.of(context).pop('delete'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (action == null || !context.mounted) return;
-
-    switch (action) {
-      case 'open':
-        onOpen();
-      case 'rename':
-        final title = await showBookmarkRenameDialog(
-          context,
-          initialTitle: bookmark.displayTitle,
-        );
-        if (title == null) return;
-        await state.updateBookmark(bookmark.copyWith(title: title));
-      case 'edit':
-        final result = await showBookmarkDialog(
-          context,
-          url: bookmark.url,
-          initialTitle: bookmark.displayTitle,
-          whitelistDefault: bookmark.whitelistPattern != null,
-          isEditing: true,
-          categoryId: bookmark.categoryId,
-        );
-        if (result == null) return;
-        await state.editBookmark(
-          bookmark,
-          title: result.title,
-          grantWhitelist: result.grantWhitelist,
-          wholeSite: result.wholeSite,
-        );
-        if (result.categoryId != bookmark.categoryId) {
-          await state.moveBookmark(bookmark.copyWith(title: result.title),
-              categoryId: result.categoryId);
-        }
-      case 'thumbnail':
-        final bytes = await onCaptureThumbnail!.call();
-        if (bytes == null || bytes.isEmpty) return;
-        await state.setBookmarkThumbnail(bookmark, bytes);
-      case 'delete':
-        if (!context.mounted) return;
-        final removeRule = await confirmBookmarkDelete(context, bookmark: bookmark);
-        if (removeRule == null) return;
-        await state.removeBookmark(bookmark, removeWhitelistRule: removeRule);
-    }
-  }
 }
 
 class _TileBody extends StatelessWidget {
   const _TileBody({
     required this.bookmark,
     required this.onOpen,
-    required this.onLongPress,
-    required this.onMenu,
   });
 
   final Bookmark bookmark;
   final VoidCallback onOpen;
-
-  /// Null while the tile is used as drag feedback.
-  final VoidCallback? onLongPress;
-
-  final VoidCallback onMenu;
 
   @override
   Widget build(BuildContext context) {
@@ -497,7 +199,6 @@ class _TileBody extends StatelessWidget {
           // The whole tile is tappable, caption included: with the title below
           // the square, tapping the text must open the bookmark too.
           onTap: onOpen,
-          onLongPress: onLongPress,
           borderRadius: BorderRadius.circular(14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -540,30 +241,12 @@ class _TileBody extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 2),
-              Row(
-                children: [
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      bookmark.host,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
-                    ),
-                  ),
-                  SizedBox(
-                    width: 26,
-                    height: 22,
-                    child: IconButton(
-                      tooltip: '更多操作',
-                      padding: EdgeInsets.zero,
-                      iconSize: 16,
-                      visualDensity: VisualDensity.compact,
-                      onPressed: onMenu,
-                      icon: const Icon(Icons.more_vert),
-                    ),
-                  ),
-                ],
+              Text(
+                bookmark.host,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
               ),
             ],
           ),
@@ -634,51 +317,6 @@ class _Monogram extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _AddTile extends StatelessWidget {
-  const _AddTile({required this.onTap, required this.categoryLabel});
-
-  final VoidCallback onTap;
-  final String categoryLabel;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(
-          child: Material(
-            clipBehavior: Clip.antiAlias,
-            borderRadius: BorderRadius.circular(14),
-            color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
-            child: InkWell(
-              onTap: onTap,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: theme.colorScheme.outlineVariant),
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.add, size: 28, color: theme.colorScheme.primary),
-                    const SizedBox(height: 4),
-                    Text('添加到$categoryLabel', style: theme.textTheme.labelSmall),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 6),
-        // Keeps the add tile optically aligned with the captioned tiles.
-        Text(' ', style: theme.textTheme.bodySmall, maxLines: 2),
-        Text(' ', style: theme.textTheme.labelSmall),
-      ],
     );
   }
 }

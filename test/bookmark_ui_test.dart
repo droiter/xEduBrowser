@@ -10,7 +10,8 @@ import 'package:tablet_browser/state/app_scope.dart';
 import 'package:tablet_browser/state/app_state.dart';
 import 'package:tablet_browser/ui/theme.dart';
 
-/// The home page bookmark wall: square tiles showing each bookmark.
+/// The home page bookmark wall: square tiles showing each bookmark, and nothing
+/// else — adding and deleting live in the settings screen.
 void main() {
   late Directory directory;
   late AppState state;
@@ -33,8 +34,6 @@ void main() {
   Future<void> pumpStart(
     WidgetTester tester, {
     ValueChanged<String>? onNavigate,
-    Future<void> Function(String categoryId)? onAdd,
-    Future<void> Function()? onImport,
   }) async {
     tester.view.physicalSize = const Size(1400, 1100);
     tester.view.devicePixelRatio = 1.0;
@@ -52,12 +51,7 @@ void main() {
             GlobalCupertinoLocalizations.delegate,
           ],
           home: Scaffold(
-            body: StartView(
-              onNavigate: onNavigate ?? (_) {},
-              onOpenLocalFile: () {},
-              onAddBookmark: onAdd,
-              onImportBookmarks: onImport,
-            ),
+            body: StartView(onNavigate: onNavigate ?? (_) {}),
           ),
         ),
       ),
@@ -65,11 +59,16 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets('with no bookmarks the home page invites adding one', (tester) async {
-    await pumpStart(tester, onAdd: (_) async {});
-    expect(find.text('书签'), findsOneWidget);
-    expect(find.textContaining('还没有书签'), findsOneWidget);
-    expect(find.text('添加书签'), findsWidgets);
+  testWidgets('with no bookmarks the home page only explains where to add one',
+      (tester) async {
+    await pumpStart(tester);
+
+    expect(find.text('还没有书签'), findsOneWidget);
+    // No add/delete controls on the home page.
+    expect(find.text('添加书签'), findsNothing);
+    expect(find.textContaining('添加到'), findsNothing);
+    expect(find.byType(FilledButton), findsNothing);
+    expect(find.byType(IconButton), findsNothing);
   });
 
   testWidgets('bookmarks appear as tiles with names and the allowed badge',
@@ -83,13 +82,15 @@ void main() {
       );
     });
 
-    await pumpStart(tester, onAdd: (_) async {});
+    await pumpStart(tester);
 
     expect(find.text('课程平台'), findsOneWidget);
     expect(find.text('新闻'), findsOneWidget);
     // Only the bookmark that granted a whitelist entry carries the badge.
     expect(find.text('已放行'), findsOneWidget);
-    expect(find.text('2 个 · 0 个分类'), findsOneWidget);
+    // The section header is the category name and its count.
+    expect(find.text(uncategorizedLabel), findsOneWidget);
+    expect(find.text('2'), findsOneWidget);
   });
 
   testWidgets('a missing screenshot falls back to the monogram tile',
@@ -101,7 +102,7 @@ void main() {
       );
     });
 
-    await pumpStart(tester, onAdd: (_) async {});
+    await pumpStart(tester);
     await tester.pump(const Duration(milliseconds: 50));
 
     // The tile still renders with its caption even though the image is gone.
@@ -115,7 +116,7 @@ void main() {
     });
 
     final opened = <String>[];
-    await pumpStart(tester, onNavigate: opened.add, onAdd: (_) async {});
+    await pumpStart(tester, onNavigate: opened.add);
 
     await tester.tap(find.text('课程平台'));
     await tester.pump();
@@ -123,19 +124,21 @@ void main() {
     expect(opened, ['https://school.test/lessons']);
   });
 
-  testWidgets('the add tile starts the add flow with its category', (tester) async {
+  testWidgets('the home page has no bookmark management buttons at all',
+      (tester) async {
     await tester.runAsync(() async {
       await state.addBookmark(url: 'https://school.test/a', title: '学校');
     });
 
-    final requested = <String>[];
-    await pumpStart(tester, onAdd: (categoryId) async => requested.add(categoryId));
+    await pumpStart(tester);
 
-    // '添加到未分类' is the per-section ＋ tile; the header button is '添加书签'.
-    await tester.tap(find.text('添加到$uncategorizedLabel'));
-    await tester.pump();
-
-    expect(requested, [uncategorizedId]);
+    // The management controls that used to live here moved into settings.
+    expect(find.text('添加书签'), findsNothing);
+    expect(find.text('从目录导入'), findsNothing);
+    expect(find.text('分类管理'), findsNothing);
+    expect(find.text('添加到$uncategorizedLabel'), findsNothing);
+    expect(find.byTooltip('更多操作'), findsNothing);
+    expect(find.byTooltip('删除书签'), findsNothing);
   });
 
   testWidgets('the URL prompt returns the typed address', (tester) async {
@@ -256,9 +259,8 @@ void main() {
         await state.addBookmark(url: 'https://site$i.test/', title: '站点 $i');
       }
     });
-    await pumpStart(tester, onAdd: (_) async {});
+    await pumpStart(tester);
 
-    expect(find.text('5 个 · 0 个分类'), findsOneWidget);
     for (var i = 0; i < 5; i++) {
       expect(find.text('站点 $i'), findsOneWidget);
     }
@@ -291,25 +293,25 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('a local page in its own folder pre-grants that folder',
+  testWidgets('the dialog lists the address and its folder before granting',
       (tester) async {
     await pumpForm(
         tester, 'file:///sdcard/Books/Caterpillar/Caterpillar%20ebook.html');
 
-    final tile = tester.widget<CheckboxListTile>(
-        find.widgetWithText(CheckboxListTile, '放行该文件所在目录'));
-    expect(tile.value, isTrue);
-    // The rule the user is about to create is the folder, not the .html file.
+    // Both rules are created: the file, and the folder holding it (so its
+    // sibling CSS/scripts/images load instead of the page coming up blank).
     expect(
         find.textContaining('file:///sdcard/Books/Caterpillar/'), findsWidgets);
+    expect(
+        find.textContaining(
+            'file:///sdcard/Books/Caterpillar/Caterpillar%20ebook.html'),
+        findsWidgets);
+    expect(find.textContaining('还会放行它所在的目录'), findsOneWidget);
   });
 
   testWidgets('a local page in a storage root stays file-only', (tester) async {
     await pumpForm(tester, 'file:///sdcard/page.html');
 
-    final tile = tester.widget<CheckboxListTile>(
-        find.widgetWithText(CheckboxListTile, '放行该文件所在目录'));
-    expect(tile.value, isFalse);
     expect(find.textContaining('整张存储卡'), findsOneWidget);
     expect(find.textContaining('file:///sdcard/page.html'), findsWidgets);
   });
