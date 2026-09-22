@@ -395,7 +395,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 if (tab.loading) {
                   unawaited(tab.controller.stop());
                 } else if (tab.url != UrlResolver.homeUrl) {
-                  unawaited(tab.controller.reload());
+                  // Reload, or re-load when the view went away (going to the
+                  // start page destroys it) — a plain reload would be dropped.
+                  unawaited(tab.controller.reloadOrLoad(tab.url));
                 }
               },
               onHome: () => _navigate(_homeUrl),
@@ -468,6 +470,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
       settings: _nativeSettings(state.settings.toNativeSettings()),
       policy: state.nativePolicyPayload(),
       onCreated: (_) => tab.controller.markCreated(),
+      onDisposed: tab.controller.markDisposed,
     );
   }
 }

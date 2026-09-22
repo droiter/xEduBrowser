@@ -13,13 +13,21 @@ import 'browser_bridge.dart';
 /// The platform view itself is created by `PolicyWebViewFactory` on the Android
 /// side; Dart only supplies the creation parameters (settings + the current
 /// policy snapshot) and the Flutter-side surface.
-class PolicyWebView extends StatelessWidget {
+///
+/// The widget is only mounted while the tab is actually showing a page: the
+/// start page and the block panel replace it, which **destroys the native
+/// WebView**. [onDisposed] reports that, so the owning
+/// [BrowserViewController] stops believing the view is there and queues the
+/// next navigation instead of sending it to a dead view (a load sent to a
+/// disposed view is silently dropped and leaves a blank page).
+class PolicyWebView extends StatefulWidget {
   const PolicyWebView({
     super.key,
     required this.viewId,
     required this.settings,
     required this.policy,
     this.onCreated,
+    this.onDisposed,
   });
 
   final int viewId;
@@ -31,6 +39,21 @@ class PolicyWebView extends StatelessWidget {
   final Map<String, dynamic> policy;
 
   final ValueChanged<int>? onCreated;
+
+  /// Called when this widget leaves the tree, i.e. when the native view is
+  /// being destroyed.
+  final VoidCallback? onDisposed;
+
+  @override
+  State<PolicyWebView> createState() => _PolicyWebViewState();
+}
+
+class _PolicyWebViewState extends State<PolicyWebView> {
+  @override
+  void dispose() {
+    widget.onDisposed?.call();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,15 +70,15 @@ class PolicyWebView extends StatelessWidget {
           viewType: BrowserBridge.viewType,
           layoutDirection: TextDirection.ltr,
           creationParams: <String, dynamic>{
-            'viewId': viewId,
-            'settings': settings,
-            'policy': policy,
+            'viewId': widget.viewId,
+            'settings': widget.settings,
+            'policy': widget.policy,
           },
           creationParamsCodec: const StandardMessageCodec(),
         );
         controller.addOnPlatformViewCreatedListener((id) {
           params.onPlatformViewCreated(id);
-          onCreated?.call(id);
+          widget.onCreated?.call(id);
         });
         controller.create();
         return controller;
@@ -65,15 +88,20 @@ class PolicyWebView extends StatelessWidget {
 }
 
 /// Owns the lifecycle of one browser tab's platform view.
+///
+/// The native view only exists while a page is displayed; [markCreated] and
+/// [markDisposed] follow the widget, and a navigation requested while there is
+/// no view is queued and replayed once one exists. Loading eagerly would be
+/// dropped by the native side, which has no live view with this id at that
+/// moment, and the tab would sit blank.
 class BrowserViewController extends ChangeNotifier {
   BrowserViewController({required this.viewId});
 
   final int viewId;
   bool _created = false;
 
-  /// A navigation requested before the native view existed. Loading eagerly
-  /// would be dropped by the native side, because it has no view with this id
-  /// yet, so it is replayed once the view reports itself created.
+  /// A navigation requested before the native view existed, replayed once the
+  /// view reports itself created.
   String? _pendingUrl;
 
   bool get isCreated => _created;
@@ -89,6 +117,14 @@ class BrowserViewController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The widget (and with it the native view) went away: the next navigation
+  /// must be queued again instead of being sent into the void.
+  void markDisposed() {
+    if (!_created) return;
+    _created = false;
+    notifyListeners();
+  }
+
   Future<void> loadUrl(String url) async {
     if (url == 'about:home') return;
     if (!_created) {
@@ -96,6 +132,15 @@ class BrowserViewController extends ChangeNotifier {
       return;
     }
     await BrowserBridge.loadUrl(viewId, url);
+  }
+
+  /// Reloads the displayed page, or re-loads [url] when the view is gone.
+  ///
+  /// A plain reload against a disposed view is dropped, which is what made a
+  /// blank tab impossible to recover with the toolbar's refresh button.
+  Future<void> reloadOrLoad(String url) async {
+    if (!_created) return loadUrl(url);
+    await reload();
   }
 
   Future<void> goBack() => BrowserBridge.goBack(viewId);

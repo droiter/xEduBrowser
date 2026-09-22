@@ -89,6 +89,17 @@ class PolicyBridge(private val appContext: Context) : EventChannel.StreamHandler
         views.remove(viewId)
     }
 
+    /**
+     * Removes [view] only when it is still the one registered for [viewId].
+     *
+     * Disposal of a platform view and creation of its replacement can overlap,
+     * so an unconditional remove could drop the live view and make every later
+     * command vanish.
+     */
+    fun unregister(viewId: Int, view: PolicyWebView) {
+        views.remove(viewId, view)
+    }
+
     fun view(viewId: Int): PolicyWebView? = views[viewId]
 
     fun allViews(): List<PolicyWebView> = views.values.toList()

@@ -160,6 +160,12 @@ class PolicyWebView(
 
     override fun dispose() {
         disposed = true
+        // Stop being reachable by viewId: a command dispatched to a disposed
+        // view is silently dropped (`loadUrl` returns early), which is how a
+        // navigation used to vanish and leave the tab blank. Only this exact
+        // instance is removed, so a newer view registered under the same tab id
+        // is left alone.
+        bridge.unregister(viewId, this)
         try {
             webView.stopLoading()
             webView.webChromeClient = null
