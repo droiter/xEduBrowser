@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tablet_browser/browser/browser_screen.dart';
+import 'package:tablet_browser/browser/policy_webview.dart';
 import 'package:tablet_browser/state/app_scope.dart';
 import 'package:tablet_browser/state/app_state.dart';
 import 'package:tablet_browser/ui/theme.dart';
@@ -33,7 +34,8 @@ void main() {
     // instead of letting them raise MissingPluginException.
     const commands = MethodChannel('tablet_browser/commands');
     const events = MethodChannel('tablet_browser/events');
-    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(commands, (call) async {
       if (call.method == 'captureThumbnail') return previewBytes;
       return null;
@@ -48,10 +50,20 @@ void main() {
   });
 
   tearDown(() {
-    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-    messenger.setMockMethodCallHandler(const MethodChannel('tablet_browser/commands'), null);
-    messenger.setMockMethodCallHandler(const MethodChannel('tablet_browser/events'), null);
-    messenger.setMockMethodCallHandler(const MethodChannel('flutter/platform_views'), null);
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(
+      const MethodChannel('tablet_browser/commands'),
+      null,
+    );
+    messenger.setMockMethodCallHandler(
+      const MethodChannel('tablet_browser/events'),
+      null,
+    );
+    messenger.setMockMethodCallHandler(
+      const MethodChannel('flutter/platform_views'),
+      null,
+    );
     if (directory.existsSync()) directory.deleteSync(recursive: true);
   });
 
@@ -80,14 +92,17 @@ void main() {
 
   /// Delivers a native event on `tablet_browser/events`, as the Android side
   /// would.
-  Future<void> sendNativeEvent(WidgetTester tester, Map<String, dynamic> event) async {
+  Future<void> sendNativeEvent(
+    WidgetTester tester,
+    Map<String, dynamic> event,
+  ) async {
     await tester.runAsync(() async {
       await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .handlePlatformMessage(
-        'tablet_browser/events',
-        const StandardMethodCodec().encodeSuccessEnvelope(event),
-        (_) {},
-      );
+            'tablet_browser/events',
+            const StandardMethodCodec().encodeSuccessEnvelope(event),
+            (_) {},
+          );
     });
     await tester.pump();
   }
@@ -99,7 +114,9 @@ void main() {
     int tries = 80,
   }) async {
     for (var i = 0; i < tries && !done(); i++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
       await tester.pump(const Duration(milliseconds: 30));
     }
   }
@@ -134,10 +151,67 @@ void main() {
     expect(find.text('添加书签'), findsWidgets);
   });
 
-  testWidgets('opening a bookmarked page captures its tile preview',
-      (tester) async {
+  /// Simulates the Android back button.
+  Future<void> pressSystemBack(WidgetTester tester) async {
+    await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+      'flutter/navigation',
+      const JSONMethodCodec().encodeMethodCall(const MethodCall('popRoute')),
+      (_) {},
+    );
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('back on a page closes the tab and lands on the start page', (
+    tester,
+  ) async {
+    await pumpShell(tester);
+    // The single tab starts on the start page, so back may leave the app.
+    expect(
+      tester.widget<PopScope<Object>>(find.byType(PopScope<Object>)).canPop,
+      isTrue,
+    );
+
+    await sendNativeEvent(tester, <String, dynamic>{
+      'type': 'pageFinished',
+      'viewId': 1,
+      'url': 'https://school.test/lessons',
+      'title': '课程平台',
+    });
+    // A page is displayed now: back must not drop to the launcher.
+    expect(find.byType(PolicyWebView), findsOneWidget);
+    expect(
+      tester.widget<PopScope<Object>>(find.byType(PopScope<Object>)).canPop,
+      isFalse,
+    );
+
+    await pressSystemBack(tester);
+
+    // The tab was closed, which returns to the start page — not to the desktop.
+    expect(find.byType(PolicyWebView), findsNothing);
+    expect(find.text('还没有书签'), findsOneWidget);
+    expect(
+      tester.widget<PopScope<Object>>(find.byType(PopScope<Object>)).canPop,
+      isTrue,
+    );
+  });
+
+  testWidgets('back on the start page leaves the app alone', (tester) async {
+    await pumpShell(tester);
+
+    await pressSystemBack(tester);
+
+    // Nothing to close: the pop is left to the system, which exits the app.
+    expect(find.text('还没有书签'), findsOneWidget);
+  });
+
+  testWidgets('opening a bookmarked page captures its tile preview', (
+    tester,
+  ) async {
     await tester.runAsync(() async {
-      await state.addBookmark(url: 'https://school.test/lessons', title: '课程平台');
+      await state.addBookmark(
+        url: 'https://school.test/lessons',
+        title: '课程平台',
+      );
     });
     expect(state.bookmarks.single.thumbnailPath, isNull);
 
@@ -152,12 +226,16 @@ void main() {
 
     final path = state.bookmarks.single.thumbnailPath;
     expect(path, isNotNull);
-    expect(File(path!).readAsBytesSync(), previewBytes,
-        reason: '截图应写入书签的预览图文件');
+    expect(
+      File(path!).readAsBytesSync(),
+      previewBytes,
+      reason: '截图应写入书签的预览图文件',
+    );
   });
 
-  testWidgets('a page that is not bookmarked is not screenshotted',
-      (tester) async {
+  testWidgets('a page that is not bookmarked is not screenshotted', (
+    tester,
+  ) async {
     await pumpShell(tester);
     await sendNativeEvent(tester, <String, dynamic>{
       'type': 'pageFinished',

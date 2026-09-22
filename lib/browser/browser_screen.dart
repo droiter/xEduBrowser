@@ -24,10 +24,10 @@ class BrowserTab {
   BrowserTab._(this.viewId, this.controller, this.url);
 
   factory BrowserTab.create({required int viewId, String? url}) => BrowserTab._(
-        viewId,
-        BrowserViewController(viewId: viewId),
-        url ?? UrlResolver.homeUrl,
-      );
+    viewId,
+    BrowserViewController(viewId: viewId),
+    url ?? UrlResolver.homeUrl,
+  );
 
   final int viewId;
   final BrowserViewController controller;
@@ -67,8 +67,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
   /// Views with a capture in flight, so one slow screenshot is not queued twice.
   final Set<int> _thumbnailInFlight = <int>{};
 
-  BrowserTab? get _active =>
-      _activeIndex >= 0 && _activeIndex < _tabs.length ? _tabs[_activeIndex] : null;
+  BrowserTab? get _active => _activeIndex >= 0 && _activeIndex < _tabs.length
+      ? _tabs[_activeIndex]
+      : null;
 
   @override
   void didChangeDependencies() {
@@ -88,8 +89,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
     };
     unawaited(BrowserBridge.setPolicy(state.nativePolicyPayload()));
 
-    _eventSubscription =
-        BrowserBridge.eventStream().map(BrowserEvent.fromMap).listen(_onNativeEvent);
+    _eventSubscription = BrowserBridge.eventStream()
+        .map(BrowserEvent.fromMap)
+        .listen(_onNativeEvent);
     _addTab(activate: true);
   }
 
@@ -100,9 +102,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   Map<String, dynamic> _nativeSettings(Map<String, dynamic> settings) => {
-        ...settings,
-        'blockPageHtml': BlockPageTemplate.html,
-      };
+    ...settings,
+    'blockPageHtml': BlockPageTemplate.html,
+  };
 
   // ------------------------------------------------------------- tabs
 
@@ -189,9 +191,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   Future<void> _openLocalFile() async {
-    final url = await Navigator.of(context).push<String>(
-      MaterialPageRoute(builder: (_) => const LocalFilesScreen()),
-    );
+    final url = await Navigator.of(
+      context,
+    ).push<String>(MaterialPageRoute(builder: (_) => const LocalFilesScreen()));
     if (url == null || !mounted) return;
     _navigate(url);
   }
@@ -224,9 +226,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
       categoryId: result.categoryId,
     );
     if (!mounted) return;
-    _snack(result.grantWhitelist
-        ? '已添加书签「${bookmark.displayTitle}」并加入白名单（网址 + 所在站点）'
-        : '已添加书签「${bookmark.displayTitle}」（未加入白名单）');
+    _snack(
+      result.grantWhitelist
+          ? '已添加书签「${bookmark.displayTitle}」并加入白名单（网址 + 所在站点）'
+          : '已添加书签「${bookmark.displayTitle}」（未加入白名单）',
+    );
 
     _navigate(url);
   }
@@ -263,9 +267,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _thumbnailRefreshed.add(bookmark.id);
     final updated = await _capturePreview(tab, bookmark);
     if (!mounted) return;
-    _snack(updated
-        ? '已更新「${bookmark.displayTitle}」的预览图'
-        : '暂时截不到图，请等页面显示完整后再试');
+    _snack(
+      updated ? '已更新「${bookmark.displayTitle}」的预览图' : '暂时截不到图，请等页面显示完整后再试',
+    );
   }
 
   /// Screenshots [tab] and stores the result as [bookmark]'s preview.
@@ -284,7 +288,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
       if (!mounted || tab.blocked != null || tab.url == UrlResolver.homeUrl) {
         return false;
       }
-      final bytes = await BrowserBridge.captureThumbnail(tab.viewId, maxWidth: 480);
+      final bytes = await BrowserBridge.captureThumbnail(
+        tab.viewId,
+        maxWidth: 480,
+      );
       if (bytes == null || bytes.isEmpty || !mounted) return false;
       // The tab may have navigated on while the capture was in flight.
       final current = state.bookmarkFor(tab.url);
@@ -351,9 +358,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
       case 'downloadRequested':
         // The native layer only hands allowed URLs to the download manager,
         // and additionally emits requestBlocked for refused ones.
-        _snack(event.allowed
-            ? '开始下载：${event.url}'
-            : '下载被名单拦截：${event.url}');
+        _snack(event.allowed ? '开始下载：${event.url}' : '下载被名单拦截：${event.url}');
     }
   }
 
@@ -361,10 +366,32 @@ class _BrowserScreenState extends State<BrowserScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(message, maxLines: 3, overflow: TextOverflow.ellipsis),
-        duration: const Duration(seconds: 4),
-      ));
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message, maxLines: 3, overflow: TextOverflow.ellipsis),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+  }
+
+  // ------------------------------------------------------------- system back
+
+  /// Whether the Android back button should leave the app.
+  ///
+  /// It only does so from the start page. While a page is displayed back closes
+  /// the tab instead — with a single tab that lands on the start page — so a
+  /// child cannot drop straight to the launcher from inside a page, and the
+  /// browser never disappears by accident.
+  bool get _canLeaveApp {
+    final tab = _active;
+    return tab == null || tab.showsStartView;
+  }
+
+  /// Closes the tab that is showing a page, which returns to the start page
+  /// when it was the last one.
+  void _handleSystemBack() {
+    if (_tabs.isEmpty) return;
+    _closeTab(_activeIndex);
   }
 
   // -------------------------------------------------------------- build
@@ -377,66 +404,81 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
     // No address bar: the page fills the screen and the only chrome is one thin
     // strip of navigation controls, the tab list and the menu.
-    return Scaffold(
-      body: SafeArea(
-        child: Column(
-          children: [
-            _BrowserTopBar(
-              tabs: _tabs,
-              activeIndex: _activeIndex,
-              tab: tab,
-              onSelect: _selectTab,
-              onClose: _closeTab,
-              onAddTab: () => _addTab(activate: true),
-              onBack: () => tab?.controller.goBack(),
-              onForward: () => tab?.controller.goForward(),
-              onReload: () {
-                if (tab == null) return;
-                if (tab.loading) {
-                  unawaited(tab.controller.stop());
-                } else if (tab.url != UrlResolver.homeUrl) {
-                  // Reload, or re-load when the view went away (going to the
-                  // start page destroys it) — a plain reload would be dropped.
-                  unawaited(tab.controller.reloadOrLoad(tab.url));
-                }
-              },
-              onHome: () => _navigate(_homeUrl),
-              onRefreshPreview: tab != null &&
-                      tab.blocked == null &&
-                      tab.url != UrlResolver.homeUrl &&
-                      state.isBookmarked(tab.url)
-                  ? _refreshActivePreview
-                  : null,
-              onOpenFile: _openLocalFile,
-              onRules: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const RulesScreen()),
+    return PopScope(
+      canPop: _canLeaveApp,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _handleSystemBack();
+      },
+      child: Scaffold(
+        body: SafeArea(
+          child: Column(
+            children: [
+              _BrowserTopBar(
+                tabs: _tabs,
+                activeIndex: _activeIndex,
+                tab: tab,
+                onSelect: _selectTab,
+                onClose: _closeTab,
+                onAddTab: () => _addTab(activate: true),
+                onBack: () => tab?.controller.goBack(),
+                onForward: () => tab?.controller.goForward(),
+                onReload: () {
+                  if (tab == null) return;
+                  if (tab.loading) {
+                    unawaited(tab.controller.stop());
+                  } else if (tab.url != UrlResolver.homeUrl) {
+                    // Reload, or re-load when the view went away (going to the
+                    // start page destroys it) — a plain reload would be dropped.
+                    unawaited(tab.controller.reloadOrLoad(tab.url));
+                  }
+                },
+                onHome: () => _navigate(_homeUrl),
+                onRefreshPreview:
+                    tab != null &&
+                        tab.blocked == null &&
+                        tab.url != UrlResolver.homeUrl &&
+                        state.isBookmarked(tab.url)
+                    ? _refreshActivePreview
+                    : null,
+                onOpenFile: _openLocalFile,
+                onRules: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const RulesScreen()),
+                ),
+                onTester: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const PolicyTesterScreen(),
+                  ),
+                ),
+                onSettings: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const SettingsScreen(),
+                  ),
+                ),
+                onLog: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const RequestLogScreen(),
+                  ),
+                ),
               ),
-              onTester: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const PolicyTesterScreen()),
+              if (tab != null && tab.loading)
+                LinearProgressIndicator(
+                  value: tab.progress <= 0 ? null : tab.progress / 100,
+                  minHeight: 2,
+                ),
+              Expanded(
+                child: _tabs.isEmpty
+                    ? const SizedBox.shrink()
+                    : IndexedStack(
+                        index: _activeIndex,
+                        children: [
+                          for (final each in _tabs)
+                            _buildTabBody(each, state, theme),
+                        ],
+                      ),
               ),
-              onSettings: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const SettingsScreen()),
-              ),
-              onLog: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const RequestLogScreen()),
-              ),
-            ),
-            if (tab != null && tab.loading)
-              LinearProgressIndicator(
-                value: tab.progress <= 0 ? null : tab.progress / 100,
-                minHeight: 2,
-              ),
-            Expanded(
-              child: _tabs.isEmpty
-                  ? const SizedBox.shrink()
-                  : IndexedStack(
-                      index: _activeIndex,
-                      children: [
-                        for (final each in _tabs) _buildTabBody(each, state, theme),
-                      ],
-                    ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -454,9 +496,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
             tab.url = _homeUrl;
           });
         },
-        onEditRules: () => Navigator.of(context).push(
-          MaterialPageRoute<void>(builder: (_) => const RulesScreen()),
-        ),
+        onEditRules: () => Navigator.of(context)
+            .push(MaterialPageRoute<void>(builder: (_) => const RulesScreen())),
         onTest: () => Navigator.of(context).push(
           MaterialPageRoute<void>(builder: (_) => const PolicyTesterScreen()),
         ),
@@ -571,7 +612,10 @@ class _BrowserTopBar extends StatelessWidget {
                     onTap: () => onSelect(index),
                     borderRadius: BorderRadius.circular(8),
                     child: Container(
-                      constraints: const BoxConstraints(maxWidth: 200, minWidth: 96),
+                      constraints: const BoxConstraints(
+                        maxWidth: 200,
+                        minWidth: 96,
+                      ),
                       padding: const EdgeInsets.symmetric(horizontal: 10),
                       decoration: BoxDecoration(
                         color: selected
@@ -597,10 +641,12 @@ class _BrowserTopBar extends StatelessWidget {
                               each.blocked != null
                                   ? Icons.block
                                   : each.url.startsWith('file://')
-                                      ? Icons.insert_drive_file_outlined
-                                      : Icons.public,
+                                  ? Icons.insert_drive_file_outlined
+                                  : Icons.public,
                               size: 14,
-                              color: each.blocked != null ? theme.colorScheme.error : null,
+                              color: each.blocked != null
+                                  ? theme.colorScheme.error
+                                  : null,
                             ),
                           const SizedBox(width: 8),
                           Expanded(
@@ -666,10 +712,7 @@ class _BrowserTopBar extends StatelessWidget {
               const PopupMenuItem(value: 'log', child: Text('访问日志')),
               const PopupMenuItem(value: 'file', child: Text('打开本地网页')),
               if (onRefreshPreview != null)
-                const PopupMenuItem(
-                  value: 'preview',
-                  child: Text('更新当前页预览图'),
-                ),
+                const PopupMenuItem(value: 'preview', child: Text('更新当前页预览图')),
             ],
           ),
         ],
@@ -720,21 +763,30 @@ class _BlockedView extends StatelessWidget {
             const SizedBox(height: 12),
             Text(
               decision.reason.labelZh,
-              style: theme.textTheme.titleMedium?.copyWith(color: theme.colorScheme.error),
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: theme.colorScheme.error,
+              ),
             ),
             const SizedBox(height: 20),
             _BlockedField(label: '请求地址', value: url, mono: true),
-            _BlockedField(label: '规范化地址', value: decision.normalizedUrl, mono: true),
+            _BlockedField(
+              label: '规范化地址',
+              value: decision.normalizedUrl,
+              mono: true,
+            ),
             if (matched.isNotEmpty)
               _BlockedField(
                 label: '决定性的名单条目（最具体者胜）',
-                value: matched.map((m) => '${m.kind.labelZh}：${m.rule.pattern}').join('\n'),
+                value: matched
+                    .map((m) => '${m.kind.labelZh}：${m.rule.pattern}')
+                    .join('\n'),
                 mono: true,
               ),
             if (decision.conflictResolved)
               _BlockedField(
                 label: '冲突解决',
-                value: '黑白名单均命中且互不包含，按当前设置「'
+                value:
+                    '黑白名单均命中且互不包含，按当前设置「'
                     '${decision.reason.labelZh}」处理',
               ),
             const SizedBox(height: 24),
@@ -772,7 +824,11 @@ class _BlockedView extends StatelessWidget {
 }
 
 class _BlockedField extends StatelessWidget {
-  const _BlockedField({required this.label, required this.value, this.mono = false});
+  const _BlockedField({
+    required this.label,
+    required this.value,
+    this.mono = false,
+  });
 
   final String label;
   final String value;

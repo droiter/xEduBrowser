@@ -48,6 +48,8 @@ tool/release.sh --bump minor           # 只构建打包，不上传
 - 多标签页、前进/后退/刷新/停止、进度条、页面标题。
 - **全屏浏览界面**：没有地址栏，唯一的顶栏只有导航按钮、标签页和右上角的菜单；
   网页正文占满其余空间，孩子无法在浏览器里输入网址。
+- **系统返回键**：在网页/拦截页上按返回＝关掉当前标签页（只剩一个标签时回到起始页），
+  不会直接退出到桌面；只有在起始页按返回才会退出应用。
 - **首页只有书签方块**：按分类分组，没有「添加/删除书签」按钮；方块显示该页面的**预览图**，
   预览图在书签对应的页面被打开时自动截图生成并在下次打开时刷新。
 - **书签在设置里管理**：右上角菜单 →「设置」→「书签」，可添加书签、从本地目录导入、管理分类、
@@ -299,7 +301,7 @@ export ANDROID_HOME=/opt/android-sdk
 cd tablet_browser
 flutter pub get
 
-# 单元测试（Dart 侧，312 个）
+# 单元测试（Dart 侧，314 个）
 flutter test
 
 # 原生过滤引擎的 JVM 单元测试（642 个，需要 Gradle）
@@ -335,7 +337,7 @@ tool/release.sh --upload --push      # 例如：发布 v1.0.1 并上传到 yacc@
 
 ## 六、测试与验证
 
-**Dart 侧：312 个测试全部通过**（`flutter analyze` 全项目零问题）
+**Dart 侧：314 个测试全部通过**（`flutter analyze` 全项目零问题）
 
 | 测试文件 | 覆盖内容 |
 |---|---|
@@ -359,7 +361,7 @@ tool/release.sh --upload --push      # 例如：发布 v1.0.1 并上传到 yacc@
 | `test/bookmark_import_ui_test.dart` | 导入对话框端到端：预览内容、确认后写入指定分类并生效一条规则、取消不改动、空目录提示 |
 | `test/bookmark_settings_ui_test.dart` | 设置页书签卡片：添加书签（网址 + 所在站点一起放行）、列表与删除、分类管理面板 |
 | `test/browser_lifecycle_test.dart` | 视图生命周期：视图未创建/已销毁时导航**排队并在创建后重放**（不再被静默丢弃成空白页）、刷新在视图消失时会重新加载 |
-| `test/browser_shell_ui_test.dart` | 浏览器外壳：**没有任何输入框（无地址栏）**、右上角菜单首项是「设置」并能进入设置页、**打开书签页面后自动生成预览图**（未加书签的页面不截图） |
+| `test/browser_shell_ui_test.dart` | 浏览器外壳：**没有任何输入框（无地址栏）**、右上角菜单首项是「设置」并能进入设置页、**打开书签页面后自动生成预览图**（未加书签的页面不截图）、**返回键在网页上关标签页、在起始页才退出** |
 | `test/vector_sync_test.dart` | 保证 Kotlin 侧读取的向量文件与 Dart 侧字节一致（防止两份实现测试到不同版本） |
 
 **Kotlin 侧：627 个 JVM 测试全部通过**（`./gradlew :app:testDebugUnitTest`）
@@ -377,7 +379,7 @@ tool/release.sh --upload --push      # 例如：发布 v1.0.1 并上传到 yacc@
 把「两个实现是否彼此一致」也钉死。实测结果：
 
 ```
-Dart:   312 tests, 0 failures
+Dart:   314 tests, 0 failures
 Kotlin: 642 tests, 0 failures
 flutter analyze: No issues found
 flutter build apk --release: ✓ app-release.apk (52 MB)
@@ -395,7 +397,7 @@ cd android && ./gradlew :app:testDebugUnitTest                  # Kotlin
 ## 七、已知限制
 
 1. **未在真机/模拟器上运行过。** 本环境没有连接任何 Android 设备，也没有系统镜像，
-   因此验证到的是：`flutter build apk --release` 成功产出 APK、Dart 侧 312 个测试通过
+   因此验证到的是：`flutter build apk --release` 成功产出 APK、Dart 侧 314 个测试通过
    （含各管理界面的真实渲染测试）、Kotlin 侧 627 个测试通过。真机上的 WebView 渲染、
    手势、以及第 2 条描述的标签页显示问题，仍需要在设备上确认。
 2. **多标签页用 `IndexedStack` 保活**。这样切标签不会重新加载页面，但 Android 混合渲染下
