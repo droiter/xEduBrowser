@@ -114,11 +114,17 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
 
   static const String _createSentinel = '__create__';
 
+  /// The address in the form the policy actually judges: a page served by the
+  /// built-in loopback server is shown (and granted) as the `file://` address it
+  /// stands for, and local paths are percent-encoded. Without this the dialog
+  /// would promise a rule the engine never matches.
+  late final String _policyUrl = AppScope.read(context).policyUrl(widget.url);
+
   /// Every rule the dialog is about to create: the address itself, then the
   /// site (or local folder) holding it.
-  List<String> get _patterns => BookmarkWhitelist.grantPatterns(widget.url);
+  List<String> get _patterns => BookmarkWhitelist.grantPatterns(_policyUrl);
 
-  bool get _isLocalFile => widget.url.startsWith('file://');
+  bool get _isLocalFile => _policyUrl.startsWith('file://');
 
   @override
   void dispose() {
@@ -161,7 +167,7 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                widget.url,
+                _policyUrl,
                 style: theme.textTheme.bodySmall?.copyWith(
                   fontFamily: 'monospace',
                   color: theme.hintColor,
@@ -231,7 +237,7 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
                   padding: const EdgeInsets.only(left: 4, top: 4),
                   child: Text(
                     _isLocalFile
-                        ? (BookmarkWhitelist.wholeSiteWidens(widget.url)
+                        ? (BookmarkWhitelist.wholeSiteWidens(_policyUrl)
                             ? '本地网页的样式、脚本、页面图片都在同一个目录里，'
                                 '所以除了这个文件本身，还会放行它所在的目录。'
                             : '这个文件就在存储卡根目录下，放行它的目录等于放行整张存储卡，'

@@ -309,6 +309,17 @@ void main() {
     expect(find.textContaining('还会放行它所在的目录'), findsOneWidget);
   });
 
+  testWidgets('a loopback address is previewed as the file it stands for',
+      (tester) async {
+    // The rule the dialog promises must be the one the engine actually checks:
+    // a locally served page is judged as its `file://` address.
+    await pumpForm(tester, 'http://127.0.0.1:8787/pages/a.html');
+
+    expect(
+        find.textContaining('file://${directory.path}/pages/a.html'), findsWidgets);
+    expect(find.textContaining('http://127.0.0.1:8787'), findsNothing);
+  });
+
   testWidgets('a local page in a storage root stays file-only', (tester) async {
     await pumpForm(tester, 'file:///sdcard/page.html');
 

@@ -293,7 +293,7 @@ export ANDROID_HOME=/opt/android-sdk
 cd tablet_browser
 flutter pub get
 
-# 单元测试（Dart 侧，303 个）
+# 单元测试（Dart 侧，304 个）
 flutter test
 
 # 原生过滤引擎的 JVM 单元测试（642 个，需要 Gradle）
@@ -329,7 +329,7 @@ tool/release.sh --upload --push      # 例如：发布 v1.0.1 并上传到 yacc@
 
 ## 六、测试与验证
 
-**Dart 侧：303 个测试全部通过**（`flutter analyze` 全项目零问题）
+**Dart 侧：304 个测试全部通过**（`flutter analyze` 全项目零问题）
 
 | 测试文件 | 覆盖内容 |
 |---|---|
@@ -370,7 +370,7 @@ tool/release.sh --upload --push      # 例如：发布 v1.0.1 并上传到 yacc@
 把「两个实现是否彼此一致」也钉死。实测结果：
 
 ```
-Dart:   303 tests, 0 failures
+Dart:   304 tests, 0 failures
 Kotlin: 642 tests, 0 failures
 flutter analyze: No issues found
 flutter build apk --release: ✓ app-release.apk (52 MB)
@@ -388,7 +388,7 @@ cd android && ./gradlew :app:testDebugUnitTest                  # Kotlin
 ## 七、已知限制
 
 1. **未在真机/模拟器上运行过。** 本环境没有连接任何 Android 设备，也没有系统镜像，
-   因此验证到的是：`flutter build apk --release` 成功产出 APK、Dart 侧 303 个测试通过
+   因此验证到的是：`flutter build apk --release` 成功产出 APK、Dart 侧 304 个测试通过
    （含各管理界面的真实渲染测试）、Kotlin 侧 627 个测试通过。真机上的 WebView 渲染、
    手势、以及第 2 条描述的标签页显示问题，仍需要在设备上确认。
 2. **多标签页用 `IndexedStack` 保活**。这样切标签不会重新加载页面，但 Android 混合渲染下

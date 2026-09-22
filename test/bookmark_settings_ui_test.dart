@@ -56,11 +56,18 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// Real file I/O only completes outside the widget test's fake-async zone.
-  Future<void> letIoFinish(WidgetTester tester) async {
-    for (var i = 0; i < 12; i++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
-      await tester.pump(const Duration(milliseconds: 40));
+  /// Real file I/O only completes outside the widget test's fake-async zone, so
+  /// real time is interleaved with pumps until [done] holds. A fixed number of
+  /// iterations is flaky when the whole suite runs in parallel; waiting for the
+  /// condition keeps it fast and deterministic.
+  Future<void> waitFor(
+    WidgetTester tester,
+    bool Function() done, {
+    int tries = 80,
+  }) async {
+    for (var i = 0; i < tries && !done(); i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 30));
     }
   }
 
@@ -100,7 +107,7 @@ void main() {
         .first;
     await tester.enterText(titleField, '课程平台');
     await tester.tap(find.text('添加'));
-    await letIoFinish(tester);
+    await waitFor(tester, () => state.bookmarks.isNotEmpty);
 
     expect(state.bookmarks.single.url, 'https://school.test/lessons');
     expect(state.bookmarks.single.title, '课程平台');
@@ -135,7 +142,14 @@ void main() {
     await tester.tap(find.text('删除书签'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('删除'));
-    await letIoFinish(tester);
+    // The bookmark disappears from the list before its rules are written
+    // away, so wait for the rules too.
+    await waitFor(
+      tester,
+      () =>
+          state.bookmarks.isEmpty &&
+          state.policy.rulesOf(PolicyListKind.whitelist).isEmpty,
+    );
 
     expect(state.bookmarks, isEmpty);
     expect(state.policy.rulesOf(PolicyListKind.whitelist), isEmpty);
