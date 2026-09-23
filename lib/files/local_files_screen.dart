@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -30,7 +31,8 @@ class LocalFilesScreen extends StatefulWidget {
   State<LocalFilesScreen> createState() => _LocalFilesScreenState();
 }
 
-class _LocalFilesScreenState extends State<LocalFilesScreen> {
+class _LocalFilesScreenState extends State<LocalFilesScreen>
+    with WidgetsBindingObserver {
   /// Generous cap: hitting it used to hide files silently. The notice is also
   /// shown at the *top* of the list now, not only after scrolling past
   /// everything.
@@ -50,7 +52,36 @@ class _LocalFilesScreenState extends State<LocalFilesScreen> {
   @override
   void initState() {
     super.initState();
+    // Coming back from the system permission screen must re-check: the parent
+    // grants all-files access there, and without this the banner — and the
+    // empty listing — stayed as they were until they tapped 刷新.
+    WidgetsBinding.instance.addObserver(this);
     _checkStorageAccess();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    unawaited(_refreshAfterReturning());
+  }
+
+  /// Re-reads the permission and refreshes the listing when the app comes back
+  /// to the foreground (typically from the all-files-access settings screen).
+  Future<void> _refreshAfterReturning() async {
+    final bool? wasGranted = _hasAllFilesAccess;
+    final bool granted = await _checkStorageAccess();
+    final String? path = _path;
+    if (path != null) _load(path);
+    if (!mounted) return;
+    if (wasGranted == false && granted) {
+      showAppSnackBar(context, '已获得存储权限，目录已刷新');
+    }
   }
 
   @override
@@ -68,9 +99,10 @@ class _LocalFilesScreenState extends State<LocalFilesScreen> {
   /// listing can still return a few entries while the folder the user cares
   /// about comes back empty — so the warning never appeared and the user just
   /// saw "这个目录是空的" with the file sitting right there.
-  Future<void> _checkStorageAccess() async {
+  Future<bool> _checkStorageAccess() async {
     final bool granted = await BrowserBridge.hasAllFilesAccess();
     if (mounted) setState(() => _hasAllFilesAccess = granted);
+    return granted;
   }
 
   void _load(String path, {bool notify = true}) {

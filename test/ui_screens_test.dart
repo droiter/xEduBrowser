@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tablet_browser/browser/start_view.dart';
@@ -165,6 +166,41 @@ void main() {
     expect(find.textContaining('未获得「所有文件访问权限」'), findsOneWidget);
     expect(find.text('打开系统权限设置'), findsWidgets);
     expect(find.textContaining('显示为空'), findsWidgets);
+  });
+
+  testWidgets('returning from the permission screen re-checks and refreshes', (
+    tester,
+  ) async {
+    // The first visit to shared storage sends the parent to the system screen;
+    // when they come back the screen must notice the permission and refresh,
+    // instead of still claiming it is missing.
+    var granted = false;
+    const commands = MethodChannel('tablet_browser/commands');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(commands, (call) async {
+      if (call.method == 'hasAllFilesAccess') return granted;
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(commands, null));
+
+    await pump(tester, const LocalFilesScreen(startPath: '/sdcard/Download'));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 60)),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('未获得「所有文件访问权限」'), findsOneWidget);
+
+    // The parent grants it and returns to the app.
+    granted = true;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 60)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('未获得「所有文件访问权限」'), findsNothing);
+    expect(find.text('已获得存储权限，目录已刷新'), findsOneWidget);
   });
 
   testWidgets('no permission warning for a private directory', (tester) async {
