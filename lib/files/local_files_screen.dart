@@ -413,6 +413,7 @@ class _LocalFilesScreenState extends State<LocalFilesScreen> {
           final String name = _basename(file.path);
           final bool isHtml = name.toLowerCase().endsWith('.html') ||
               name.toLowerCase().endsWith('.htm');
+          final bool isPdf = name.toLowerCase().endsWith('.pdf');
           return ListTile(
             leading: Icon(
               isHtml ? Icons.html : _iconFor(name),
@@ -420,7 +421,10 @@ class _LocalFilesScreenState extends State<LocalFilesScreen> {
             ),
             title: Text(name, style: monoStyle(context, fontSize: 13.5)),
             subtitle: Text(
-              '${_describe(file)}${isHtml ? ' · 网页文件，点击返回 file:// 网址' : ' · 点击返回 file:// 网址'}',
+              '${_describe(file)}'
+              '${isHtml ? ' · 网页文件，点击返回 file:// 网址' : ''}'
+              '${isPdf ? ' · PDF，加入书签后按页阅读' : ''}'
+              '${!isHtml && !isPdf ? ' · 点击返回 file:// 网址' : ''}',
               style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             onTap: () => _handleTap(file),

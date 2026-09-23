@@ -7,6 +7,8 @@ import '../browser/browser_bridge.dart';
 import '../browser/policy_webview.dart';
 import '../browser/url_input.dart';
 import '../files/local_file_url.dart';
+import '../pdf/pdf_document.dart';
+import '../pdf/pdf_reader_screen.dart';
 import '../state/app_scope.dart';
 import 'bookmark_dialog.dart';
 
@@ -107,6 +109,16 @@ class _BookmarkPreviewScreenState extends State<BookmarkPreviewScreen> {
         return;
       }
       target = index;
+    }
+    // A PDF goes to the page-by-page reader: the WebView cannot render one.
+    final pdfPath = PdfDocuments.localPathOf(target);
+    if (pdfPath != null) {
+      setState(() => _url = target);
+      _syncAddress();
+      unawaited(Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => PdfReaderScreen(url: pdfPath, title: _title),
+      )));
+      return;
     }
     setState(() {
       _url = target;

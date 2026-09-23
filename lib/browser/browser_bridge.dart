@@ -77,6 +77,26 @@ abstract final class BrowserBridge {
   static Future<Uint8List?> captureThumbnail(int viewId, {int maxWidth = 320}) =>
       _invoke<Uint8List>('captureThumbnail', {'viewId': viewId, 'maxWidth': maxWidth});
 
+  /// Number of pages in a local PDF, or 0 when it cannot be read.
+  static Future<int> pdfPageCount(String path) async =>
+      await _invoke<int>('pdfPageCount', {'path': path}) ?? 0;
+
+  /// One PDF page rendered to PNG bytes, or null when it cannot be rendered.
+  ///
+  /// Android's WebView cannot display a PDF, so the reader asks the platform
+  /// renderer for one page at a time. Callers must treat null as "show an
+  /// error", never as an exception.
+  static Future<Uint8List?> renderPdfPage(
+    String path,
+    int index, {
+    int maxWidth = 1400,
+  }) =>
+      _invoke<Uint8List>('renderPdfPage', {
+        'path': path,
+        'index': index,
+        'maxWidth': maxWidth,
+      });
+
   /// Pushes the whole policy (including the loopback mapping) to the native
   /// engine. Called on every policy change and after the local server starts.
   static Future<void> setPolicy(Map<String, dynamic> policy) =>

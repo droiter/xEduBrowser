@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,8 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tablet_browser/browser/browser_screen.dart';
 import 'package:tablet_browser/browser/policy_webview.dart';
+import 'package:tablet_browser/files/local_file_url.dart';
+import 'package:tablet_browser/pdf/pdf_reader_screen.dart';
 import 'package:tablet_browser/state/app_scope.dart';
 import 'package:tablet_browser/state/app_state.dart';
 import 'package:tablet_browser/ui/theme.dart';
@@ -18,6 +21,11 @@ void main() {
 
   /// What the mocked `captureThumbnail` returns.
   final previewBytes = Uint8List.fromList(<int>[137, 80, 78, 71, 1, 2, 3, 4]);
+
+  /// A real 1x1 PNG, so the PDF reader can decode the mocked page.
+  final pdfPageBytes = base64Decode(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  );
 
   setUp(() {
     directory = Directory.systemTemp.createTempSync('tb_shell');
@@ -38,6 +46,8 @@ void main() {
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(commands, (call) async {
       if (call.method == 'captureThumbnail') return previewBytes;
+      if (call.method == 'pdfPageCount') return 3;
+      if (call.method == 'renderPdfPage') return pdfPageBytes;
       return null;
     });
     messenger.setMockMethodCallHandler(events, (call) async => null);
@@ -233,6 +243,31 @@ void main() {
       previewBytes,
       reason: '截图应写入书签的预览图文件',
     );
+  });
+
+  testWidgets('a PDF bookmark opens the page-by-page reader', (tester) async {
+    File('${directory.path}/说明.pdf').writeAsStringSync('%PDF-1.4 test');
+
+    await tester.runAsync(() async {
+      await state.addBookmark(
+        url: LocalFileUrl.canonical('${directory.path}/说明.pdf'),
+        title: '使用说明',
+      );
+    });
+
+    await pumpShell(tester);
+    await tester.tap(find.text('使用说明'));
+    for (var i = 0; i < 12; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump(const Duration(milliseconds: 40));
+    }
+
+    // The reader replaces the WebView — a WebView cannot show a PDF.
+    expect(find.byType(PdfReaderScreen), findsOneWidget);
+    expect(find.byType(PolicyWebView), findsNothing);
+    expect(find.byKey(pdfPageIndicatorKey), findsOneWidget);
   });
 
   testWidgets('a page that is not bookmarked is not screenshotted', (

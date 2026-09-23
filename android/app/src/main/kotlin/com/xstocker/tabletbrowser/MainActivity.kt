@@ -197,6 +197,32 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
+                // PDF bookmarks: Android's WebView cannot show a PDF, so the
+                // page is rendered here and the Flutter pager displays it.
+                "pdfPageCount" -> {
+                    val path = call.argument<String>("path").orEmpty()
+                    val answered = AtomicBoolean(false)
+                    val answer: (Int) -> Unit = { count ->
+                        if (answered.compareAndSet(false, true)) result.success(count)
+                    }
+                    if (path.isEmpty()) answer(0) else PdfPageRenderer.pageCount(path, answer)
+                }
+
+                "renderPdfPage" -> {
+                    val path = call.argument<String>("path").orEmpty()
+                    val index = (call.argument<Any?>("index") as? Number)?.toInt() ?: -1
+                    val maxWidth = (call.argument<Any?>("maxWidth") as? Number)?.toInt()
+                    val answered = AtomicBoolean(false)
+                    val answer: (ByteArray?) -> Unit = { bytes ->
+                        if (answered.compareAndSet(false, true)) result.success(bytes)
+                    }
+                    if (path.isEmpty() || index < 0) {
+                        answer(null)
+                    } else {
+                        PdfPageRenderer.renderPage(path, index, maxWidth, answer)
+                    }
+                }
+
                 // Not part of the frozen contract table, but the Dart bridge
                 // calls it: send the operator to the system screen that grants
                 // MANAGE_EXTERNAL_STORAGE so local files can be browsed.

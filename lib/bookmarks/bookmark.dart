@@ -343,6 +343,10 @@ abstract final class BookmarkWhitelist {
   static List<String> grantPatterns(String url) {
     final own = urlPattern(url);
     if (own.isEmpty) return const [];
+    // A PDF is read page by page by the built-in reader, which needs nothing
+    // but the file: granting its whole folder would allow the sibling pages of
+    // a course folder the parent never asked for.
+    if (LocalFileUrl.isPdf(url)) return [own];
     final site = sitePattern(url);
     if (site.isEmpty || site == own) return [own];
     return [own, site];

@@ -6,6 +6,8 @@ import '../bookmarks/bookmark.dart';
 import '../bookmarks/bookmark_dialog.dart';
 import '../files/local_files_screen.dart';
 import '../log/request_log_screen.dart';
+import '../pdf/pdf_document.dart';
+import '../pdf/pdf_reader_screen.dart';
 import '../policy/policy_engine.dart';
 import '../rules/policy_tester_screen.dart';
 import '../rules/rules_screen.dart';
@@ -177,6 +179,20 @@ class _BrowserScreenState extends State<BrowserScreen> {
     // the file it stands for, exactly like the native engine does.
     final decision = state.decideUrl(resolved.url);
     state.logDecision(resolved.url, decision);
+
+    // A PDF cannot be shown in a WebView, so an allowed local PDF bookmark is
+    // read page by page in its own screen. The tab is left untouched (it stays
+    // on the start page) instead of pointing at a page it cannot render.
+    final pdfPath = decision.allowed
+        ? PdfDocuments.localPathOf(state.policyUrl(resolved.url))
+        : null;
+    if (pdfPath != null) {
+      unawaited(Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => PdfReaderScreen(url: pdfPath),
+      )));
+      return;
+    }
+
     setState(() {
       tab.url = resolved.url;
       tab.blocked = decision.allowed ? null : decision;

@@ -180,3 +180,41 @@ Requirements for the Kotlin implementation:
 - The screenshot is a convenience: the Flutter side always has a generated
   fallback tile, so a `null` result must degrade gracefully and never surface
   an error to the user.
+
+---
+
+## 5. PDF page rendering (added for PDF bookmarks)
+
+Android's WebView cannot display a PDF, so a PDF bookmark is read page by page:
+Kotlin renders one page to PNG (`android.graphics.pdf.PdfRenderer`) and Flutter
+pages through the images.
+
+| Method | Args | Returns |
+|---|---|---|
+| `pdfPageCount` | `path` (filesystem path) | `int` (0 when the file cannot be read) |
+| `renderPdfPage` | `path`, `index` (0-based), `maxWidth` (int, default 1400) | `ByteArray` (PNG bytes) or `null` on failure |
+
+Dart side (`BrowserBridge.pdfPageCount` / `BrowserBridge.renderPdfPage`):
+
+```dart
+static Future<int> pdfPageCount(String path);
+static Future<Uint8List?> renderPdfPage(String path, int index, {int maxWidth = 1400});
+```
+
+Requirements for the Kotlin implementation (`PdfPageRenderer.kt`):
+
+- Runs **off the platform thread** (a single worker: `PdfRenderer` is not thread
+  safe), and answers the `MethodChannel.Result` **on the platform thread**,
+  exactly once.
+- The renderer is opened and closed per request, so no state is kept between
+  pages and a deleted or replaced file cannot leave a stale handle open.
+- The page is drawn onto a white `ARGB_8888` bitmap: PDF pages are transparent
+  where nothing is drawn, and a reader wants paper, not a hole.
+- The bitmap size comes from `PdfPageSizing.targetSize` (pure JVM maths, unit
+  tested): aspect ratio preserved, never upscaled, and capped at
+  `MAX_PIXELS` so a malformed page cannot exhaust memory.
+- Every failure mode (missing file, password-protected document, out-of-range
+  page, allocation failure, any thrown `Throwable`) is reported as `0`/`null` —
+  the renderer never throws, and the reader shows a message instead.
+- The PDF is still policy gated: Dart decides *before* opening the reader, and
+  only for an allowed URL.

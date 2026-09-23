@@ -54,6 +54,15 @@ abstract final class LocalFileUrl {
     return '${Uri.file(withSlash)}$query';
   }
 
+  /// Whether [pathOrUrl] names a PDF file.
+  ///
+  /// PDFs are not shown in a WebView (Android's WebView has no PDF viewer), so
+  /// the caller opens them in the built-in page-by-page reader instead.
+  static bool isPdf(String pathOrUrl) {
+    final path = pathOf(pathOrUrl) ?? pathOrUrl.trim();
+    return path.toLowerCase().endsWith('.pdf');
+  }
+
   /// Whether [url] points at a directory on this device.
   static bool isDirectory(String url) {
     final path = pathOf(url);

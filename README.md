@@ -43,6 +43,9 @@ tool/release.sh --bump minor           # 只构建打包，不上传
 
 - 在线网页：`http` / `https`，开启 JavaScript、DOM Storage、Cookie，支持现代 SPA。
 - 本地静态网页：`file:///...` 直接打开本地 HTML/CSS/JS/图片。
+- **PDF 书签**：本地 PDF 也可以加为书签；点击后进入按页阅读的阅读器——
+  点屏幕左/右三分之一翻上/下一页，中间显示或隐藏工具栏，也可以左右滑动翻页，
+  底部显示「当前页 / 总页数」并有上一页/下一页按钮。
 - 本地动态网页：内置 `http://127.0.0.1:<端口>` 本地服务器，让 `fetch` / `XMLHttpRequest` / ES module /
   Web Worker 等依赖正常 http 源的功能可用（`file://` 源下这些会被浏览器同源策略限制）。
 - 多标签页、前进/后退/刷新/停止、进度条、页面标题。
@@ -218,6 +221,10 @@ tool/release.sh --bump minor           # 只构建打包，不上传
 - 本地网页（`file://`）的放行范围**包含它所在的整个目录**（规则形如
   `file:///sdcard/Books/Caterpillar/`）：翻页书这类本地 HTML 会引用同目录下的 `mobile/`、
   `files/` 等成百上千个相对资源，只放行那个 `.html` 会让页面变成**空白页**。
+- **PDF 只放行文件本身**（不加所在目录）：阅读器直接读取该文件，不需要同目录的其他资源，
+  没必要把整个文件夹都放开。
+- **PDF 按页阅读**：Android 的 WebView 无法显示 PDF，所以 PDF 书签由原生 `PdfRenderer`
+  一页一页渲染成 PNG，再用 Flutter 的分页控件展示（左右点击、左右滑动、底部按钮）。
 
 > **本地地址一律写成规范形式。** 存储卡上带空格或中文的文件名会被**百分号编码**
 > （`/sdcard/课件/第 1 课.html` → `/sdcard/%E8%AF%BE%E4%BB%B6/%E7%AC%AC%201%20%E8%AF%BE.html`），
@@ -279,6 +286,9 @@ lib/
 │   ├── parental_challenge.dart 算术题状态机（出题、判分、锁定期，纯逻辑可测）
 │   ├── parental_password.dart  密码派生/校验（盐 + 迭代 SHA-256）、重试限流、验证方式枚举
 │   └── parental_gate.dart      包裹式验证界面（密码为默认，算术题为可选），未通过不构建受保护内容
+├── pdf/
+│   ├── pdf_document.dart       PDF 地址识别、分页状态机与点击分区（纯逻辑可测）
+│   └── pdf_reader_screen.dart  按页阅读：左右点击、滑动、底部页码与翻页按钮
 ├── local_server/local_http_server.dart   本地 HTTP 服务器 + 策略判定 + MIME
 ├── state/                      应用状态、配置持久化、访问日志、书签与设置的单一来源
 ├── rules/                      名单管理、规则编辑器、策略测试器
@@ -291,6 +301,7 @@ android/app/src/main/kotlin/com/xstocker/tabletbrowser/
 ├── PolicyWebView.kt            WebView + 四个拦截点
 ├── PolicyWebViewFactory.kt     PlatformView 工厂
 ├── PolicyBridge.kt             通道注册与 view 注册表、主线程派发
+├── PdfPageRenderer.kt          PDF 分页渲染（PdfRenderer → PNG）+ 尺寸计算（纯 JVM 可测）
 ├── ThumbnailCapture.kt         WebView 截图 → PNG（书签缩略图），尺寸计算为纯 JVM 可单测
 └── MainActivity.kt             Flutter 引擎装配
 ```
@@ -375,17 +386,20 @@ tool/release.sh --upload --push      # 例如：发布 v1.0.1 并上传到 yacc@
 | `test/bookmark_settings_ui_test.dart` | 设置页书签卡片：添加书签（网址 + 所在站点一起放行）、列表与删除、分类管理面板、**对话框里的「浏览并确认内容」能打开预览** |
 | `test/bookmark_preview_ui_test.dart` | 预览窗口：地址栏跟随导航、`previewPolicy` 只作用于该视图、**在预览里加书签＝当前页地址 + 所在目录 pattern**、返回时把「已添加」带回对话框；事件流可被两个监听者共享 |
 | `test/local_file_url_test.dart` | 本地地址规范化：空格/中文百分号编码与幂等、保留 query、目录 pattern 结尾斜杠、目录识别与 `index.html` |
+| `test/pdf_document_test.dart` | PDF 分页状态机（边界夹取、页码标签、空文档）、点击三分区、PDF 地址识别与标题回退、**PDF 只放行文件本身** |
+| `test/pdf_reader_ui_test.dart` | 阅读器真实渲染：首页与页码、左右三分之一点击翻页、中间点击隐藏/显示工具栏、**滑动翻页**、按钮翻页、打不开的 PDF 给出提示 |
 | `test/browser_lifecycle_test.dart` | 视图生命周期：视图未创建/已销毁时导航**排队并在创建后重放**（不再被静默丢弃成空白页）、刷新在视图消失时会重新加载 |
 | `test/browser_shell_ui_test.dart` | 浏览器外壳：**没有任何输入框（无地址栏）**、右上角菜单首项是「设置」并能进入设置页、**打开书签页面后自动生成预览图**（未加书签的页面不截图）、**返回键在网页上关标签页、在起始页才退出** |
 | `test/vector_sync_test.dart` | 保证 Kotlin 侧读取的向量文件与 Dart 侧字节一致（防止两份实现测试到不同版本） |
 
-**Kotlin 侧：627 个 JVM 测试全部通过**（`./gradlew :app:testDebugUnitTest`）
+**Kotlin 侧：648 个 JVM 测试全部通过**（`./gradlew :app:testDebugUnitTest`）
 
 | 测试类 | 数量 | 覆盖内容 |
 |---|---|---|
 | `PolicyVectorsTest` | 62 | 同一份规格向量，逐条断言 `allowed` + `reason` |
 | `DartCrossCheckTest` | 560 | 14 组配置 × 40 个网址的差分用例，断言 `allowed`、`reason`、`normalizedUrl` 与 Dart 引擎一致 |
 | `ThumbnailSizingTest` | 15 | 缩略图截图的尺寸计算与空白判定 |
+| `PdfPageSizingTest` | 6 | PDF 页面渲染尺寸：不放大、等比缩放、旋转页、非法尺寸、像素上限、宽度夹取 |
 | `LoopbackMappingTest` | 5 | 回环 URL → `file://` 映射 |
 | `ThumbnailSizingTest` | 15 | 书签缩略图的截图尺寸/空白判定（纯 JVM） |
 
@@ -395,7 +409,7 @@ tool/release.sh --upload --push      # 例如：发布 v1.0.1 并上传到 yacc@
 
 ```
 Dart:   320 tests, 0 failures
-Kotlin: 642 tests, 0 failures
+Kotlin: 648 tests, 0 failures
 flutter analyze: No issues found
 flutter build apk --release: ✓ app-release.apk (52 MB)
 ```
@@ -413,7 +427,7 @@ cd android && ./gradlew :app:testDebugUnitTest                  # Kotlin
 
 1. **未在真机/模拟器上运行过。** 本环境没有连接任何 Android 设备，也没有系统镜像，
    因此验证到的是：`flutter build apk --release` 成功产出 APK、Dart 侧 320 个测试通过
-   （含各管理界面的真实渲染测试）、Kotlin 侧 627 个测试通过。真机上的 WebView 渲染、
+   （含各管理界面的真实渲染测试）、Kotlin 侧 648 个测试通过。真机上的 WebView 渲染、
    手势、以及第 2 条描述的标签页显示问题，仍需要在设备上确认。
 2. **多标签页用 `IndexedStack` 保活**。这样切标签不会重新加载页面，但 Android 混合渲染下
    隐藏的 platform view 理论上存在仍然可见的风险；若真机上出现该问题，改成只挂载当前标签页并
