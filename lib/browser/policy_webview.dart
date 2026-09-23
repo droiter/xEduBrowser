@@ -8,6 +8,15 @@ import 'package:flutter/services.dart';
 
 import 'browser_bridge.dart';
 
+/// Source of platform view ids.
+///
+/// The native bridge keys views by this id, so two live views — a browser tab
+/// and the bookmark preview, or two shells — must never share one.
+int _platformViewCounter = 0;
+
+/// A process-wide unique platform view id.
+int nextPlatformViewId() => ++_platformViewCounter;
+
 /// Hosts one native policy-aware WebView.
 ///
 /// The platform view itself is created by `PolicyWebViewFactory` on the Android
@@ -26,6 +35,7 @@ class PolicyWebView extends StatefulWidget {
     required this.viewId,
     required this.settings,
     required this.policy,
+    this.previewPolicy,
     this.onCreated,
     this.onDisposed,
   });
@@ -37,6 +47,13 @@ class PolicyWebView extends StatefulWidget {
 
   /// The policy snapshot, including the `localServer` loopback mapping.
   final Map<String, dynamic> policy;
+
+  /// A policy that applies to **this view only**, overriding the shared engine.
+  ///
+  /// The bookmark preview uses `{'enabled': false}` so the parent can look at a
+  /// page that is not allowed yet — the whole point of previewing before
+  /// bookmarking. Null everywhere else.
+  final Map<String, dynamic>? previewPolicy;
 
   final ValueChanged<int>? onCreated;
 
@@ -73,6 +90,7 @@ class _PolicyWebViewState extends State<PolicyWebView> {
             'viewId': widget.viewId,
             'settings': widget.settings,
             'policy': widget.policy,
+            if (widget.previewPolicy != null) 'previewPolicy': widget.previewPolicy,
           },
           creationParamsCodec: const StandardMessageCodec(),
         );

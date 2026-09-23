@@ -25,7 +25,9 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.xstocker.tabletbrowser.policy.PolicyConfig
 import com.xstocker.tabletbrowser.policy.PolicyDecision
+import com.xstocker.tabletbrowser.policy.PolicyEngine
 import com.xstocker.tabletbrowser.policy.parseUrl
 import io.flutter.plugin.platform.PlatformView
 import java.io.ByteArrayInputStream
@@ -126,10 +128,28 @@ class PolicyWebView(
     val viewId: Int,
     initialSettings: WebViewSettings,
     private val bridge: PolicyBridge,
+    /**
+     * A policy that applies to **this view only**, replacing the shared engine.
+     *
+     * Used by the bookmark preview: the parent confirms a page's content before
+     * allowing it, so that one view runs with filtering switched off. Every
+     * other view keeps using the shared engine.
+     */
+    previewPolicy: PolicyConfig? = null,
 ) : PlatformView {
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val webView: WebView = WebView(context)
+
+    /** Filtering for this view alone, when it was created with one. */
+    private val ownEngine: PolicyEngine? = previewPolicy?.let { PolicyEngine(it) }
+
+    /**
+     * Decides [url] for this view: its own engine when it has one, the shared
+     * snapshot otherwise. Never blocks, so it is safe on the WebView worker
+     * thread too.
+     */
+    private fun decide(url: String): PolicyDecision = ownEngine?.decide(url) ?: bridge.decide(url)
 
     private var settings: WebViewSettings = initialSettings
     private val defaultUserAgent: String? = webView.settings.userAgentString
@@ -270,7 +290,7 @@ class PolicyWebView(
      */
     private fun gateNavigation(url: String, isMainFrame: Boolean): Boolean {
         if (!isPolicyGatedScheme(url)) return false
-        val decision = bridge.decide(url)
+        val decision = decide(url)
         if (decision.allowed) return false
 
         bridge.emit(
@@ -359,7 +379,7 @@ class PolicyWebView(
             } ?: return null
             if (!isPolicyGatedScheme(url)) return null
 
-            val decision = bridge.decide(url)
+            val decision = decide(url)
             if (decision.allowed) return null
 
             val resourceType = if (request.isForMainFrame) "mainFrame" else "subresource"
@@ -583,7 +603,7 @@ class PolicyWebView(
         mimeType: String?,
         contentLength: Long,
     ) {
-        val decision = bridge.decide(url)
+        val decision = decide(url)
         bridge.emit(
             mapOf(
                 "type" to "downloadRequested",

@@ -119,6 +119,15 @@ host is `127.0.0.1`/`localhost` and whose port equals
 `file://<rootPath><pathAndQuery>` so that one set of file-path rules governs
 both `file://` browsing and locally served pages.
 
+### Per-view policy override (bookmark preview)
+
+The platform view accepts an optional `previewPolicy` map in its creation
+params. When present, that view decides with its own `PolicyEngine` built from
+that map instead of the shared one — the bookmark preview runs with
+`{"enabled": false}` so a page can be inspected before it is allowed. Every
+other view keeps using the shared engine, and `setPolicy` never touches an
+override. The map is parsed with the same `PolicyConfig.fromJson`.
+
 Dart applies the same mapping (`AppState.policyUrl` / `AppState.decideUrl`,
 `mapLoopbackToFileUrl` in `lib/local_server/local_http_server.dart`) before
 deciding, and stores bookmark URLs and whitelist rules in that `file://` form.

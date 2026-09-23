@@ -1,9 +1,12 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tablet_browser/bookmarks/bookmark_dialog.dart';
 import 'package:tablet_browser/bookmarks/bookmark_manager.dart';
+import 'package:tablet_browser/bookmarks/bookmark_preview_screen.dart';
 import 'package:tablet_browser/policy/policy_config.dart';
 import 'package:tablet_browser/settings/settings_screen.dart';
 import 'package:tablet_browser/state/app_scope.dart';
@@ -27,9 +30,31 @@ void main() {
         parentalGateEnabled: false,
       ),
     );
+
+    // No native layer in a widget test; the preview hosts a platform view.
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(
+      const MethodChannel('tablet_browser/commands'),
+      (call) async => null,
+    );
+    messenger.setMockMethodCallHandler(
+      const MethodChannel('tablet_browser/events'),
+      (call) async => null,
+    );
+    messenger.setMockMethodCallHandler(
+      const MethodChannel('flutter/platform_views'),
+      (call) async => <String, dynamic>{'id': 0},
+    );
   });
 
   tearDown(() {
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(
+        const MethodChannel('tablet_browser/commands'), null);
+    messenger.setMockMethodCallHandler(
+        const MethodChannel('tablet_browser/events'), null);
+    messenger.setMockMethodCallHandler(
+        const MethodChannel('flutter/platform_views'), null);
     if (directory.existsSync()) directory.deleteSync(recursive: true);
   });
 
@@ -63,13 +88,47 @@ void main() {
   Future<void> waitFor(
     WidgetTester tester,
     bool Function() done, {
-    int tries = 80,
+    int tries = 250,
   }) async {
     for (var i = 0; i < tries && !done(); i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
       await tester.pump(const Duration(milliseconds: 30));
     }
   }
+
+  /// Advances a few frames; the preview's progress bar never settles.
+  Future<void> settle(WidgetTester tester, [int frames = 8]) async {
+    for (var i = 0; i < frames; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+  }
+
+  testWidgets('the add dialog can open the page to confirm its content',
+      (tester) async {
+    await pumpSettings(tester);
+
+    await tester.tap(find.byKey(addBookmarkButtonKey));
+    await tester.pumpAndSettle();
+    final promptField = find
+        .descendant(of: find.byType(AlertDialog), matching: find.byType(TextField))
+        .first;
+    await tester.enterText(promptField, 'school.test/lessons');
+    await tester.tap(find.text('下一步'));
+    await tester.pumpAndSettle();
+
+    // The dialog offers both: add now, or look at the page first.
+    expect(find.byKey(bookmarkPreviewButtonKey), findsOneWidget);
+    expect(find.text('添加'), findsWidgets);
+
+    await tester.tap(find.byKey(bookmarkPreviewButtonKey));
+    await settle(tester);
+
+    expect(find.byType(BookmarkPreviewScreen), findsOneWidget);
+    expect(find.byKey(previewAddressKey), findsOneWidget);
+    expect(tester.widget<TextField>(find.byKey(previewAddressKey)).controller?.text,
+        'https://school.test/lessons');
+    expect(find.textContaining('预览模式'), findsOneWidget);
+  });
 
   testWidgets('the settings screen offers adding, importing and categories',
       (tester) async {

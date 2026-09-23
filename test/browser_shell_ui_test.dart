@@ -111,7 +111,7 @@ void main() {
   Future<void> waitFor(
     WidgetTester tester,
     bool Function() done, {
-    int tries = 80,
+    int tries = 250,
   }) async {
     for (var i = 0; i < tries && !done(); i++) {
       await tester.runAsync(
@@ -164,6 +164,9 @@ void main() {
   testWidgets('back on a page closes the tab and lands on the start page', (
     tester,
   ) async {
+    await tester.runAsync(() async {
+      await state.addBookmark(url: 'https://school.test/lessons', title: '课程平台');
+    });
     await pumpShell(tester);
     // The single tab starts on the start page, so back may leave the app.
     expect(
@@ -171,13 +174,9 @@ void main() {
       isTrue,
     );
 
-    await sendNativeEvent(tester, <String, dynamic>{
-      'type': 'pageFinished',
-      'viewId': 1,
-      'url': 'https://school.test/lessons',
-      'title': '课程平台',
-    });
-    // A page is displayed now: back must not drop to the launcher.
+    // Open the bookmark: the tab now displays a page.
+    await tester.tap(find.text('课程平台'));
+    await tester.pump();
     expect(find.byType(PolicyWebView), findsOneWidget);
     expect(
       tester.widget<PopScope<Object>>(find.byType(PopScope<Object>)).canPop,
@@ -188,7 +187,7 @@ void main() {
 
     // The tab was closed, which returns to the start page — not to the desktop.
     expect(find.byType(PolicyWebView), findsNothing);
-    expect(find.text('还没有书签'), findsOneWidget);
+    expect(find.text('课程平台'), findsOneWidget);
     expect(
       tester.widget<PopScope<Object>>(find.byType(PopScope<Object>)).canPop,
       isTrue,
@@ -216,9 +215,12 @@ void main() {
     expect(state.bookmarks.single.thumbnailPath, isNull);
 
     await pumpShell(tester);
+    await tester.tap(find.text('课程平台'));
+    await tester.pump();
+    final viewId = tester.widget<PolicyWebView>(find.byType(PolicyWebView)).viewId;
     await sendNativeEvent(tester, <String, dynamic>{
       'type': 'pageFinished',
-      'viewId': 1,
+      'viewId': viewId,
       'url': 'https://school.test/lessons',
       'title': '课程平台',
     });

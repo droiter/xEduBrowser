@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../files/local_files_screen.dart';
-import 'bookmark_import.dart';
 import '../state/app_scope.dart';
 import 'bookmark.dart';
+import 'bookmark_import.dart';
+import 'bookmark_preview_screen.dart';
 
 /// What the user chose in [showBookmarkDialog].
 class BookmarkEditResult {
@@ -33,6 +36,7 @@ Future<BookmarkEditResult?> showBookmarkDialog(
   required bool whitelistDefault,
   bool isEditing = false,
   String categoryId = uncategorizedId,
+  bool allowPreview = false,
 }) => showDialog<BookmarkEditResult>(
   context: context,
   builder: (context) => _BookmarkFormDialog(
@@ -41,6 +45,7 @@ Future<BookmarkEditResult?> showBookmarkDialog(
     whitelistDefault: whitelistDefault,
     isEditing: isEditing,
     categoryId: categoryId,
+    allowPreview: allowPreview,
   ),
 );
 
@@ -58,6 +63,9 @@ const Key browseLocalFileKey = ValueKey<String>('bookmark-browse-local');
 
 /// Test hook for the 标题来源 dropdown of a local page.
 const Key bookmarkTitleSourceKey = ValueKey<String>('bookmark-title-source');
+
+/// Test hook for the 浏览并确认内容 button (settings flows only).
+const Key bookmarkPreviewButtonKey = ValueKey<String>('bookmark-open-preview');
 
 /// Asks for an address, for adding a bookmark when no page is open (the home
 /// page's own ＋ tile). The address can be typed, or picked through the local
@@ -110,6 +118,7 @@ class _BookmarkFormDialog extends StatefulWidget {
     required this.whitelistDefault,
     required this.isEditing,
     required this.categoryId,
+    required this.allowPreview,
   });
 
   final String url;
@@ -117,6 +126,11 @@ class _BookmarkFormDialog extends StatefulWidget {
   final bool whitelistDefault;
   final bool isEditing;
   final String categoryId;
+
+  /// Offer the 浏览并确认内容 button. Only the settings flows set this: the
+  /// preview runs without the address filter, so it must stay behind the
+  /// parental gate.
+  final bool allowPreview;
 
   @override
   State<_BookmarkFormDialog> createState() => _BookmarkFormDialogState();
@@ -264,6 +278,22 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
     );
   }
 
+  /// Opens the page in a preview browser so the parent can check what it is
+  /// before allowing it. When a bookmark is created there, this dialog closes:
+  /// the flow is already finished.
+  Future<void> _openPreview() async {
+    final added = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => BookmarkPreviewScreen(
+          initialUrl: _policyUrl,
+          initialTitle: _title.text.trim(),
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (added == true) Navigator.of(context).pop();
+  }
+
   Future<void> _save() async {
     var categoryId = _categoryId;
     if (_creatingCategory) {
@@ -397,6 +427,13 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
         ),
       ),
       actions: [
+        if (widget.allowPreview)
+          TextButton.icon(
+            key: bookmarkPreviewButtonKey,
+            onPressed: () => unawaited(_openPreview()),
+            icon: const Icon(Icons.open_in_new, size: 18),
+            label: const Text('浏览并确认内容'),
+          ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('取消'),

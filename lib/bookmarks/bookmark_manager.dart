@@ -103,16 +103,35 @@ class BookmarkManagerCard extends StatelessWidget {
       }
       return;
     }
+    // A folder becomes its index.html, so the bookmark opens a real page.
+    var target = resolved.url;
+    if (LocalFileUrl.isDirectory(target)) {
+      final index = LocalFileUrl.indexHtmlFor(target);
+      if (index == null) {
+        if (context.mounted) {
+          showAppSnackBar(
+            context,
+            '这个目录里没有 index.html：请选择具体的 HTML 文件，'
+            '或用「从本地目录导入」批量导入。',
+            isError: true,
+          );
+        }
+        return;
+      }
+      target = index;
+    }
 
     final result = await showBookmarkDialog(
       context,
-      url: resolved.url,
+      url: target,
       whitelistDefault: state.settings.bookmarkWhitelistByDefault,
+      // Settings sits behind the parental gate, so it may offer the preview.
+      allowPreview: true,
     );
     if (result == null || !context.mounted) return;
 
     final bookmark = await state.addBookmark(
-      url: resolved.url,
+      url: target,
       title: result.title,
       addToWhitelist: result.grantWhitelist,
       categoryId: result.categoryId,
@@ -227,6 +246,7 @@ class _BookmarkRow extends StatelessWidget {
           whitelistDefault: bookmark.whitelistPatterns.isNotEmpty,
           isEditing: true,
           categoryId: bookmark.categoryId,
+          allowPreview: true,
         );
         if (result == null) return;
         await state.editBookmark(

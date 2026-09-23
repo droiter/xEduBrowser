@@ -1,6 +1,7 @@
 package com.xstocker.tabletbrowser
 
 import android.content.Context
+import com.xstocker.tabletbrowser.policy.PolicyConfig
 import io.flutter.plugin.common.StandardMessageCodec
 import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
@@ -14,7 +15,8 @@ import io.flutter.plugin.platform.PlatformViewFactory
  * {
  *   "viewId": 1,
  *   "settings": { "javaScript": true, "domStorage": true, ... },
- *   "policy": { "enabled": true, "rules": [...], "localServer": {...} }
+ *   "policy": { "enabled": true, "rules": [...], "localServer": {...} },
+ *   "previewPolicy": { "enabled": false }   // optional, this view only
  * }
  * ```
  *
@@ -32,7 +34,11 @@ class PolicyWebViewFactory(private val bridge: PolicyBridge) :
         // A policy supplied at creation time is shared by every view.
         (params?.get("policy") as? Map<*, *>)?.let { bridge.setPolicyFromJson(it) }
 
-        val view = PolicyWebView(context, viewId, settings, bridge)
+        // …while this one replaces the shared engine for this view alone.
+        val previewPolicy = (params?.get("previewPolicy") as? Map<*, *>)
+            ?.let { PolicyConfig.fromJson(it) }
+
+        val view = PolicyWebView(context, viewId, settings, bridge, previewPolicy)
         bridge.register(view)
         return view
     }

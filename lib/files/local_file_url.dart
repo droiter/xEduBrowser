@@ -1,3 +1,5 @@
+import 'dart:io';
+
 /// Canonical `file://` URLs.
 ///
 /// The filter compares strings, so a local page must be written down exactly the
@@ -50,6 +52,24 @@ abstract final class LocalFileUrl {
     final path = pathOf(beforeQuery) ?? beforeQuery;
     final withSlash = path.startsWith('/') ? path : '/$path';
     return '${Uri.file(withSlash)}$query';
+  }
+
+  /// Whether [url] points at a directory on this device.
+  static bool isDirectory(String url) {
+    final path = pathOf(url);
+    return path != null && path.isNotEmpty && Directory(path).existsSync();
+  }
+
+  /// The `index.html` of a local directory, or null when it has none.
+  ///
+  /// The same rule the built-in local server applies, so "open this folder"
+  /// means the same thing in the preview, in the add dialog and over loopback.
+  static String? indexHtmlFor(String url) {
+    final path = pathOf(url);
+    if (path == null || path.isEmpty) return null;
+    final base = path.endsWith('/') ? path : '$path/';
+    final index = File('${base}index.html');
+    return index.existsSync() ? canonical(index.path) : null;
   }
 
   /// A whole directory as a prefix rule, with the trailing slash that keeps it

@@ -57,7 +57,6 @@ class _BrowserScreenState extends State<BrowserScreen> {
   StreamSubscription<BrowserEvent>? _eventSubscription;
   AppState? _state;
   bool _wired = false;
-  int _nextViewId = 1;
   int _activeIndex = 0;
 
   /// Bookmark ids whose preview was already refreshed during this app run, so a
@@ -115,7 +114,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   BrowserTab _addTab({bool activate = true, String? url}) {
-    final tab = BrowserTab.create(viewId: _nextViewId++, url: url ?? _homeUrl);
+    final tab = BrowserTab.create(viewId: nextPlatformViewId(), url: url ?? _homeUrl);
     _tabs.add(tab);
     if (activate) _activeIndex = _tabs.length - 1;
     setState(() {});

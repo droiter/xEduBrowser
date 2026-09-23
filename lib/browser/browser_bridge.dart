@@ -10,7 +10,14 @@ abstract final class BrowserBridge {
   static const EventChannel _events = EventChannel('tablet_browser/events');
 
   /// All page and filtering events from every WebView, tagged with `viewId`.
-  static Stream<Map<String, dynamic>> eventStream() => _events
+  ///
+  /// The stream is created once and shared: `receiveBroadcastStream()` installs
+  /// a single method-call handler per channel, so a second call would steal the
+  /// first subscriber's events. The browser shell and the bookmark preview both
+  /// listen, each filtering on its own `viewId`.
+  static Stream<Map<String, dynamic>>? _eventStream;
+
+  static Stream<Map<String, dynamic>> eventStream() => _eventStream ??= _events
       .receiveBroadcastStream()
       .map((event) => Map<String, dynamic>.from(event as Map));
 
