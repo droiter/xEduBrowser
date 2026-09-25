@@ -139,6 +139,9 @@ void main() {
 
   testWidgets('request log renders entries and its empty state', (tester) async {
     await pump(tester, const RequestLogScreen());
+    // The screen opens on the 诊断日志 tab; the request log is the second one.
+    await tester.tap(find.text('请求日志'));
+    await tester.pumpAndSettle();
     expect(find.textContaining('暂无请求记录'), findsWidgets);
 
     state.logDecision(
@@ -149,6 +152,15 @@ void main() {
     // the shell once per blocked subresource, so advance the clock past it.
     await tester.pump(const Duration(milliseconds: 250));
     expect(find.textContaining('https://a.test/x/y/z'), findsWidgets);
+  });
+
+  testWidgets('the diagnostic log tab lists what the app did', (tester) async {
+    state.logEvent('bookmark', '新增书签「课程平台」');
+    await pump(tester, const RequestLogScreen());
+
+    expect(find.text('诊断日志'), findsWidgets);
+    expect(find.text('新增书签「课程平台」'), findsOneWidget);
+    expect(find.text('暂无诊断记录'), findsNothing);
   });
 
   testWidgets('the file browser warns when all-files access is missing',

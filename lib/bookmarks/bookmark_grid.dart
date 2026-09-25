@@ -2,9 +2,20 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../pdf/pdf_document.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
+import '../ui/theme.dart';
 import 'bookmark.dart';
+import 'bookmark_dialog.dart';
+import 'category_dialogs.dart';
+import 'thumbnail_capture.dart';
+
+/// Test hook for the home page's 进入编辑模式 button.
+const Key homeEditModeButtonKey = ValueKey<String>('home-edit-mode');
+
+/// Test hook for the 完成 button shown while the home page is in edit mode.
+const Key homeEditDoneKey = ValueKey<String>('home-edit-done');
 
 /// The home page bookmark wall: one section per category, each a grid of square
 /// tiles with the title underneath.
@@ -13,12 +24,17 @@ import 'bookmark.dart';
 /// category, and dragged from one category into another. A section header folds
 /// its category shut, so a wall with several subjects fits on one screen. There
 /// is deliberately no add/delete control here — bookmarks are managed in the
-/// settings screen.
+/// settings screen, or from [editing] mode, which a parent unlocks with the
+/// parental password.
 class BookmarkGrid extends StatelessWidget {
-  const BookmarkGrid({super.key, required this.onOpen});
+  const BookmarkGrid({super.key, required this.onOpen, this.editing = false});
 
   /// Opens a bookmark's URL through the browser's policy gate.
   final ValueChanged<String> onOpen;
+
+  /// Edit mode: each bookmark gets 改标题 / 改分类 / 重做预览图 / 删除 buttons, and
+  /// the wall is rendered as a list so the buttons have room.
+  final bool editing;
 
   @override
   Widget build(BuildContext context) {
@@ -33,6 +49,7 @@ class BookmarkGrid extends StatelessWidget {
             state: state,
             categoryId: categoryId,
             onOpen: onOpen,
+            editing: editing,
           ),
           const SizedBox(height: 22),
         ],
@@ -51,11 +68,13 @@ class _CategorySection extends StatelessWidget {
     required this.state,
     required this.categoryId,
     required this.onOpen,
+    required this.editing,
   });
 
   final AppState state;
   final String categoryId;
   final ValueChanged<String> onOpen;
+  final bool editing;
 
   @override
   Widget build(BuildContext context) {
@@ -113,26 +132,32 @@ class _CategorySection extends StatelessWidget {
         // bookmarks costs nothing to lay out.
         if (!collapsed) ...[
           const SizedBox(height: 10),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 190,
-              mainAxisSpacing: 18,
-              crossAxisSpacing: 16,
-              // Taller than wide: the square thumbnail plus its caption below.
-              childAspectRatio: 0.76,
+          if (editing)
+            // Edit mode replaces the wall with rows: the four action buttons
+            // cannot fit under a square tile without squeezing the caption.
+            for (final bookmark in bookmarks)
+              _EditableBookmarkRow(key: ValueKey<String>('edit-row-${bookmark.id}'), state: state, bookmark: bookmark)
+          else
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 190,
+                mainAxisSpacing: 18,
+                crossAxisSpacing: 16,
+                // Taller than wide: the square thumbnail plus its caption below.
+                childAspectRatio: 0.76,
+              ),
+              itemCount: bookmarks.length,
+              itemBuilder: (context, index) {
+                final bookmark = bookmarks[index];
+                return BookmarkTile(
+                  bookmark: bookmark,
+                  onOpen: () => onOpen(bookmark.url),
+                  onReorderOnto: (dragged) => _dropOn(state, dragged, bookmark),
+                );
+              },
             ),
-            itemCount: bookmarks.length,
-            itemBuilder: (context, index) {
-              final bookmark = bookmarks[index];
-              return BookmarkTile(
-                bookmark: bookmark,
-                onOpen: () => onOpen(bookmark.url),
-                onReorderOnto: (dragged) => _dropOn(state, dragged, bookmark),
-              );
-            },
-          ),
         ],
       ],
     );
@@ -152,6 +177,149 @@ class _CategorySection extends StatelessWidget {
     } else {
       await state.moveBookmark(dragged, categoryId: target.categoryId, index: targetIndex);
     }
+  }
+}
+
+/// One bookmark while the home page is in edit mode: a compact row with the four
+/// management actions a parent needs — rename, change category, regenerate the
+/// preview, delete — without a detour through the settings screen.
+class _EditableBookmarkRow extends StatelessWidget {
+  const _EditableBookmarkRow({
+    super.key,
+    required this.state,
+    required this.bookmark,
+  });
+
+  final AppState state;
+  final Bookmark bookmark;
+
+  Future<void> _rename(BuildContext context) async {
+    final title = await showBookmarkRenameDialog(
+      context,
+      initialTitle: bookmark.displayTitle,
+    );
+    if (title == null || !context.mounted) return;
+    await state.updateBookmark(bookmark.copyWith(title: title));
+    if (!context.mounted) return;
+    showAppSnackBar(context, '书名已保存');
+  }
+
+  Future<void> _move(BuildContext context) async {
+    final target = await showBookmarkTargetCategoryDialog(context, bookmarkCount: 1);
+    if (target == null || !context.mounted) return;
+    await state.moveBookmarksToCategory([bookmark], categoryId: target);
+    if (!context.mounted) return;
+    showAppSnackBar(context, '已移动到「${state.categoryLabel(target)}」');
+  }
+
+  /// Force a fresh preview image, replacing whatever the tile shows now.
+  Future<void> _regenerate(BuildContext context) async {
+    if (PdfDocuments.localPathOf(bookmark.url) != null) {
+      showAppSnackBar(context, 'PDF 由阅读器按页显示，不生成预览图');
+      return;
+    }
+    showAppSnackBar(context, '正在重新生成「${bookmark.displayTitle}」的预览图…');
+    final bytes = await captureThumbnailFor(context, url: bookmark.url);
+    if (!context.mounted) return;
+    final current = state.bookmarkFor(bookmark.url);
+    if (bytes == null || bytes.isEmpty || current == null) {
+      showAppSnackBar(context, '没能生成预览图，请确认该页面能正常打开后重试', isError: true);
+      return;
+    }
+    await state.setBookmarkThumbnail(current, bytes);
+    if (!context.mounted) return;
+    showAppSnackBar(context, '预览图已重新生成');
+  }
+
+  Future<void> _delete(BuildContext context) async {
+    final removeRule = await confirmBookmarkDelete(context, bookmark: bookmark);
+    if (removeRule == null || !context.mounted) return;
+    await state.removeBookmark(bookmark, removeWhitelistRule: removeRule);
+    if (!context.mounted) return;
+    showAppSnackBar(context, '已删除「${bookmark.displayTitle}」');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final thumbnail = bookmark.thumbnailPath;
+    final id = bookmark.id;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                width: 46,
+                height: 46,
+                child: thumbnail == null || thumbnail.isEmpty
+                    ? _Monogram(bookmark: bookmark)
+                    : Image.file(
+                        File(thumbnail),
+                        fit: BoxFit.cover,
+                        cacheWidth: 138,
+                        errorBuilder: (_, _, _) => _Monogram(bookmark: bookmark),
+                      ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    bookmark.displayTitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyLarge,
+                  ),
+                  Text(
+                    '${state.categoryLabel(bookmark.categoryId)} · ${bookmark.host}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
+                  ),
+                  Text(
+                    bookmark.url,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: monoStyle(context, fontSize: 11, color: theme.hintColor),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              key: ValueKey<String>('edit-rename-$id'),
+              tooltip: '编辑书签名',
+              onPressed: () => _rename(context),
+              icon: const Icon(Icons.drive_file_rename_outline),
+            ),
+            IconButton(
+              key: ValueKey<String>('edit-move-$id'),
+              tooltip: '变更分类',
+              onPressed: () => _move(context),
+              icon: const Icon(Icons.drive_file_move_outline),
+            ),
+            IconButton(
+              key: ValueKey<String>('edit-thumbnail-$id'),
+              tooltip: '重新生成预览图',
+              onPressed: () => _regenerate(context),
+              icon: const Icon(Icons.image_outlined),
+            ),
+            IconButton(
+              key: ValueKey<String>('edit-delete-$id'),
+              tooltip: '删除书签',
+              onPressed: () => _delete(context),
+              icon: Icon(Icons.delete_outline, color: theme.colorScheme.error),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

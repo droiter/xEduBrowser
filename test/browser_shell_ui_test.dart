@@ -19,6 +19,10 @@ void main() {
   late Directory directory;
   late AppState state;
 
+  /// Every command the shell sent to the native side, for the load-watchdog
+  /// assertions.
+  final commandCalls = <MethodCall>[];
+
   /// What the mocked `captureThumbnail` returns.
   final previewBytes = Uint8List.fromList(<int>[137, 80, 78, 71, 1, 2, 3, 4]);
 
@@ -40,11 +44,13 @@ void main() {
 
     // No native layer in a widget test; answer the channel calls with nulls
     // instead of letting them raise MissingPluginException.
+    commandCalls.clear();
     const commands = MethodChannel('tablet_browser/commands');
     const events = MethodChannel('tablet_browser/events');
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(commands, (call) async {
+      commandCalls.add(call);
       if (call.method == 'captureThumbnail') return previewBytes;
       if (call.method == 'pdfPageCount') return 3;
       if (call.method == 'renderPdfPage') return pdfPageBytes;
@@ -282,5 +288,59 @@ void main() {
     });
     await tester.pump(const Duration(seconds: 2));
     expect(state.bookmarks, isEmpty);
+  });
+
+  testWidgets('a load that never finishes is retried, then reported', (
+    tester,
+  ) async {
+    await tester.runAsync(() async {
+      await state.addBookmark(url: 'https://slow.test/page', title: '慢页面');
+    });
+    await pumpShell(tester);
+
+    List<MethodCall> loadCalls() =>
+        [for (final call in commandCalls) if (call.method == 'loadUrl') call];
+
+    await tester.tap(find.text('慢页面'));
+    await tester.pump();
+    // The load is replayed once the platform view exists (after a frame).
+    await tester.pump();
+    await waitFor(tester, () => loadCalls().isNotEmpty);
+    expect(loadCalls(), hasLength(1));
+    final int viewId =
+        (loadCalls().first.arguments as Map<Object?, Object?>)['viewId']! as int;
+
+    // The page says it started but never finishes: without the watchdog the
+    // shell would spin forever, which is the bug this guards.
+    await sendNativeEvent(tester, <String, dynamic>{
+      'type': 'pageStarted',
+      'viewId': viewId,
+      'url': 'https://slow.test/page',
+    });
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(seconds: 1));
+    }
+    expect(loadCalls().length, greaterThan(1), reason: '看门狗应重发加载命令');
+    expect(
+      state.appLog.any(
+        (entry) => entry.tag == 'browser' && entry.message.contains('重试'),
+      ),
+      isTrue,
+      reason: '每次重试都要留下日志',
+    );
+
+    // After the retries run out the spinner is cleared and the user is told,
+    // instead of being left with a page that never arrives.
+    for (var i = 0; i < 9; i++) {
+      await tester.pump(const Duration(seconds: 1));
+    }
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    expect(find.textContaining('加载超时'), findsWidgets);
+    expect(
+      state.appLog.any((entry) => entry.level == LogLevel.error),
+      isTrue,
+    );
   });
 }

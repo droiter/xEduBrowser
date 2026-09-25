@@ -229,6 +229,51 @@ class RequestLogEntry {
   }
 }
 
+/// Severity of one diagnostic log line.
+enum LogLevel {
+  debug('调试'),
+  info('信息'),
+  warn('警告'),
+  error('错误');
+
+  const LogLevel(this.labelZh);
+
+  final String labelZh;
+}
+
+/// One line of the diagnostic log.
+///
+/// The request log answers "why was this address allowed or blocked"; this one
+/// answers "what did the app itself do" — page life cycle, bookmark edits,
+/// thumbnail captures, load retries. Together they are what a bug report needs,
+/// which is why 导出日志 writes both into one file.
+class AppLogEntry {
+  AppLogEntry(
+    this.tag,
+    this.message, {
+    this.level = LogLevel.info,
+    DateTime? time,
+  }) : time = time ?? DateTime.now();
+
+  final DateTime time;
+  final LogLevel level;
+
+  /// Short area the line came from, e.g. `browser`, `bookmark`, `capture`.
+  final String tag;
+
+  final String message;
+
+  String get timeLabel {
+    String two(int v) => v.toString().padLeft(2, '0');
+    String three(int v) => v.toString().padLeft(3, '0');
+    return '${two(time.hour)}:${two(time.minute)}:${two(time.second)}'
+        '.${three(time.millisecond)}';
+  }
+
+  /// `HH:mm:ss.mmm 信息 [browser] 页面开始加载 …` — one grep-able line.
+  String get line => '$timeLabel ${level.labelZh} [$tag] $message';
+}
+
 /// Reads and writes configuration as JSON in the app documents directory.
 class ConfigStore {
   final Directory directory;
@@ -314,6 +359,16 @@ class AppState extends ChangeNotifier {
   final List<RequestLogEntry> _log = [];
   static const int _logLimit = 500;
 
+  /// The diagnostic log, newest first. Larger than the request log: a bug report
+  /// usually needs the app's own steps, and each line is short.
+  final List<AppLogEntry> _appLog = [];
+  static const int _appLogLimit = 800;
+
+  /// Home page edit mode: tiles show their action buttons. Kept here (not in the
+  /// widget) so it survives the shell rebuilding the start page, and so the log
+  /// can record who turned it on.
+  bool _homeEditMode = false;
+
   /// How long log notifications are coalesced for.
   static const Duration _logNotifyWindow = Duration(milliseconds: 200);
 
@@ -339,6 +394,19 @@ class AppState extends ChangeNotifier {
       _settings.localServerRoot.isNotEmpty ? _settings.localServerRoot : store.directory.path;
 
   List<RequestLogEntry> get log => List.unmodifiable(_log);
+
+  /// Diagnostic log, newest first.
+  List<AppLogEntry> get appLog => List.unmodifiable(_appLog);
+
+  /// Whether the home page is in edit mode (tile action buttons visible).
+  bool get homeEditMode => _homeEditMode;
+
+  void setHomeEditMode(bool value) {
+    if (_homeEditMode == value) return;
+    _homeEditMode = value;
+    logEvent('home', value ? '进入首页编辑模式' : '退出首页编辑模式');
+    notifyListeners();
+  }
 
   /// All bookmarks. Use [bookmarksIn] for display order within a category.
   List<Bookmark> get bookmarks => List.unmodifiable(_library.bookmarks);
@@ -386,6 +454,12 @@ class AppState extends ChangeNotifier {
     _settings = await store.loadSettings();
     _library = await bookmarkStore.load();
     _rebuildEngine();
+    logEvent(
+      'app',
+      '配置已加载：书签 ${_library.bookmarks.length} 个、分类 ${_library.categories.length} 个、'
+          '白名单 ${_policy.rulesOf(PolicyListKind.whitelist).length} 条、'
+          '黑名单 ${_policy.rulesOf(PolicyListKind.blacklist).length} 条',
+    );
     // Screenshots whose bookmark is gone would otherwise accumulate forever.
     unawaited(bookmarkStore.pruneOrphanThumbnails(_library.bookmarks));
     if (_settings.localServerEnabled) {
@@ -597,6 +671,11 @@ class AppState extends ChangeNotifier {
     );
     notifyListeners();
     await _persistBookmarks();
+    logEvent(
+      'bookmark',
+      '${existing != null ? '更新' : '新增'}书签「${bookmark.displayTitle}」'
+          '${whitelistPatterns.isEmpty ? '（未加入白名单）' : '（白名单：${whitelistPatterns.join('、')}）'}',
+    );
     return bookmark;
   }
 
@@ -672,6 +751,11 @@ class AppState extends ChangeNotifier {
     }
     notifyListeners();
     await _persistBookmarks();
+    logEvent(
+      'bookmark',
+      '删除 ${removed.length} 个书签：${removed.map((b) => b.displayTitle).join('、')}'
+          '${removeWhitelistRule ? '（同时清理未再使用的白名单条目）' : '（保留白名单条目）'}',
+    );
   }
 
   /// Renames a bookmark and reconciles the whitelist entries it grants.
@@ -704,6 +788,11 @@ class AppState extends ChangeNotifier {
       whitelistPatterns: patterns,
       clearWhitelistPattern: patterns.isEmpty,
     ));
+    logEvent(
+      'bookmark',
+      '修改书签「${title.trim().isEmpty ? bookmark.url : title.trim()}」'
+          '${grantWhitelist ? '，白名单：${patterns.join('、')}' : '，未加入白名单'}',
+    );
   }
 
   /// Drops a whitelist rule unless another bookmark still needs the pattern.
@@ -750,11 +839,19 @@ class AppState extends ChangeNotifier {
   Future<void> setBookmarkThumbnail(Bookmark bookmark, Uint8List bytes) async {
     final previous = bookmark.thumbnailPath;
     final path = await bookmarkStore.writeThumbnail(bookmark.id, bytes);
-    if (path == null) return;
+    if (path == null) {
+      logEvent('capture', '预览图写入失败：「${bookmark.displayTitle}」', level: LogLevel.warn);
+      return;
+    }
     await updateBookmark(bookmark.copyWith(thumbnailPath: path));
     if (previous != null && previous != path) {
       await bookmarkStore.deleteThumbnail(previous);
     }
+    logEvent(
+      'capture',
+      '预览图已更新：「${bookmark.displayTitle}」${bytes.length ~/ 1024} KB'
+          '${previous == null ? '（首次）' : '（替换旧图）'}',
+    );
   }
 
   Future<void> _persistBookmarks() => bookmarkStore.save(_library);
@@ -814,6 +911,11 @@ class AppState extends ChangeNotifier {
         ],
       );
       await _finishRemoval(children, removeWhitelistRule: true);
+      logEvent(
+        'bookmark',
+        '删除分类「${category.name}」及其 ${children.length} 个书签',
+        level: children.isEmpty ? LogLevel.info : LogLevel.warn,
+      );
       return;
     }
 
@@ -934,6 +1036,11 @@ class AppState extends ChangeNotifier {
     }
 
     await _replaceBookmarks(updated);
+    logEvent(
+      'bookmark',
+      '移动 ${moving.length} 个书签到「${categoryLabel(categoryId)}」：'
+          '${moving.map((b) => b.displayTitle).join('、')}',
+    );
   }
 
   // ---------------------------------------------------------- display state
@@ -1096,6 +1203,14 @@ class AppState extends ChangeNotifier {
       await _persistBookmarks();
     }
 
+    logEvent(
+      'import',
+      '导入「${_lastSegment(plan.rootPath)}」：新增 ${added.length} 个'
+          '${decision.alreadyBookmarked > 0 ? '，跳过 ${decision.alreadyBookmarked} 个（已存在）' : ''}'
+          '${decision.nameConflicts.isNotEmpty ? '，跳过 ${decision.nameConflicts.length} 个（重名）' : ''}'
+          '${whitelistPattern.isEmpty ? '' : '，白名单：$whitelistPattern'}',
+    );
+
     return BookmarkImportOutcome(
       added: added.length,
       skipped: decision.alreadyBookmarked,
@@ -1206,6 +1321,8 @@ class AppState extends ChangeNotifier {
     final port = await server.start();
     if (port == null) {
       _localServerRunning = false;
+      logEvent('server', '本地服务器启动失败（端口 ${_settings.localServerPort} 起都被占用）',
+          level: LogLevel.error);
       notifyListeners();
       return null;
     }
@@ -1216,6 +1333,7 @@ class AppState extends ChangeNotifier {
     }
     _localServerRunning = true;
     onPolicyChanged?.call(nativePolicyPayload());
+    logEvent('server', '本地服务器已启动：http://127.0.0.1:$port/ → $root');
     notifyListeners();
     return port;
   }
@@ -1225,6 +1343,7 @@ class AppState extends ChangeNotifier {
     _localServer = null;
     _localServerRunning = false;
     onPolicyChanged?.call(nativePolicyPayload());
+    logEvent('server', '本地服务器已停止');
     notifyListeners();
   }
 
@@ -1235,6 +1354,13 @@ class AppState extends ChangeNotifier {
     final type = event['type'] as String? ?? '';
     if (type == 'requestBlocked' || type == 'navigationBlocked' || type == 'notableDecision') {
       _appendLog(RequestLogEntry.fromNative(event));
+      if (type == 'navigationBlocked') {
+        logEvent(
+          'browser',
+          '导航被拦截：${event['url'] ?? ''}（${event['explanation'] ?? event['reason'] ?? ''}）',
+          level: LogLevel.warn,
+        );
+      }
     } else if (type == 'localServerStarted' || type == 'localServerStopped') {
       notifyListeners();
     }
@@ -1260,10 +1386,38 @@ class AppState extends ChangeNotifier {
   void _appendLog(RequestLogEntry entry) {
     _log.insert(0, entry);
     if (_log.length > _logLimit) _log.removeRange(_logLimit, _log.length);
+    _scheduleLogNotify();
+  }
+
+  /// Records one diagnostic line. Cheap and safe to call from anywhere: the
+  /// rebuild it may trigger is coalesced, and the buffer is bounded.
+  void logEvent(String tag, String message, {LogLevel level = LogLevel.info}) {
+    _appLog.insert(0, AppLogEntry(tag, message, level: level));
+    if (_appLog.length > _appLogLimit) {
+      _appLog.removeRange(_appLogLimit, _appLog.length);
+    }
+    _scheduleLogNotify();
+  }
+
+  void _scheduleLogNotify() {
     _logNotifyTimer ??= Timer(_logNotifyWindow, () {
       _logNotifyTimer = null;
       notifyListeners();
     });
+  }
+
+  /// Drops the pending coalesced notification once the last listener is gone.
+  ///
+  /// The entries are already in the buffer and the timer only drives a rebuild,
+  /// so with nobody listening there is nothing to rebuild — and a timer left
+  /// running past the widget tree that created it is both a small leak and a
+  /// "timer still pending" failure in the test binding.
+  @override
+  void removeListener(VoidCallback listener) {
+    super.removeListener(listener);
+    if (hasListeners) return;
+    _logNotifyTimer?.cancel();
+    _logNotifyTimer = null;
   }
 
   void clearLog() {
@@ -1271,6 +1425,67 @@ class AppState extends ChangeNotifier {
     _logNotifyTimer?.cancel();
     _logNotifyTimer = null;
     notifyListeners();
+  }
+
+  void clearAppLog() {
+    _appLog.clear();
+    _logNotifyTimer?.cancel();
+    _logNotifyTimer = null;
+    notifyListeners();
+  }
+
+  /// Everything the two logs hold, as one text file.
+  ///
+  /// The header carries the state a support question always starts with
+  /// (counts, rules, server, port), then the diagnostic log, then the request
+  /// log — the order someone reads them in.
+  String exportLogText({DateTime? now}) {
+    final stamp = now ?? DateTime.now();
+    final buffer = StringBuffer()
+      ..writeln('xEduBrowser 日志导出')
+      ..writeln('导出时间：${_fullStamp(stamp)}')
+      ..writeln('书签：${_library.bookmarks.length} 个；分类：${_library.categories.length} 个')
+      ..writeln('白名单规则：${_policy.rulesOf(PolicyListKind.whitelist).length} 条；'
+          '黑名单规则：${_policy.rulesOf(PolicyListKind.blacklist).length} 条')
+      ..writeln('过滤总开关：${_policy.enabled ? '开启' : '关闭'}；'
+          '本地服务器：${_localServerRunning ? '运行中（${_localServer?.baseUrl ?? ''}）' : '未运行'}')
+      ..writeln('家长密码：${_settings.hasParentalPassword ? '已设置' : '未设置'}；'
+          '家长验证：${_settings.parentalGateEnabled ? '开启' : '关闭'}')
+      ..writeln()
+      ..writeln('===== 诊断日志（最新在最前，共 ${_appLog.length} 条）=====');
+    if (_appLog.isEmpty) {
+      buffer.writeln('（无）');
+    } else {
+      for (final entry in _appLog) {
+        buffer.writeln('${_fullStamp(entry.time)} ${entry.level.labelZh} '
+            '[${entry.tag}] ${entry.message}');
+      }
+    }
+    buffer
+      ..writeln()
+      ..writeln('===== 请求日志（最新在最前，共 ${_log.length} 条）=====');
+    if (_log.isEmpty) {
+      buffer.writeln('（无）');
+    } else {
+      for (final entry in _log) {
+        buffer.writeln('${_fullStamp(entry.time)} ${entry.allowed ? '允许' : '拒绝'} '
+            '[${entry.kind}] ${entry.url}');
+        buffer.writeln('    原因：${entry.reason}'
+            '${entry.explanation.isEmpty ? '' : '（${entry.explanation}）'}');
+        if (entry.matched.isNotEmpty) {
+          buffer.writeln('    命中规则：${entry.matched.join('、')}');
+        }
+      }
+    }
+    return buffer.toString();
+  }
+
+  static String _fullStamp(DateTime time) {
+    String two(int v) => v.toString().padLeft(2, '0');
+    String three(int v) => v.toString().padLeft(3, '0');
+    return '${time.year}-${two(time.month)}-${two(time.day)} '
+        '${two(time.hour)}:${two(time.minute)}:${two(time.second)}'
+        '.${three(time.millisecond)}';
   }
 
   @override

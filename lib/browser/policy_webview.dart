@@ -130,7 +130,19 @@ class BrowserViewController extends ChangeNotifier {
     final pending = _pendingUrl;
     _pendingUrl = null;
     if (pending != null) {
-      unawaited(BrowserBridge.loadUrl(viewId, pending));
+      // Replay **after** the frame that created the view: a freshly created
+      // platform view has not been laid out yet, and a WebView asked to load
+      // while it is still zero-sized can sit there loading forever — which is
+      // what a blank page with a spinner looked like until a tab switch forced a
+      // relayout.
+      //
+      // A zero-delay timer rather than a post-frame callback: a timer cannot run
+      // in the middle of a synchronous frame, so in the app it still lands after
+      // the view has been laid out, while a caller that never pumps a frame (a
+      // unit test) is not left waiting for one.
+      Timer.run(() {
+        unawaited(BrowserBridge.loadUrl(viewId, pending));
+      });
     }
     notifyListeners();
   }

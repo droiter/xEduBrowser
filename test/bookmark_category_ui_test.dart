@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tablet_browser/bookmarks/bookmark.dart';
+import 'package:tablet_browser/bookmarks/bookmark_grid.dart';
+import 'package:tablet_browser/bookmarks/category_dialogs.dart';
 import 'package:tablet_browser/browser/start_view.dart';
 import 'package:tablet_browser/state/app_scope.dart';
 import 'package:tablet_browser/state/app_state.dart';
@@ -170,8 +172,7 @@ void main() {
     expect(find.text('还没有书签的分类'), findsNothing);
   });
 
-  testWidgets('a category folds shut without hiding the others', (tester) async {
-    late AppState st;
+  testWidgets('a category folds shut without hiding the others', (tester) async {    late AppState st;
     late String lessonsId;
     await tester.runAsync(() async {
       final lessons = await state.addCategory('课程');
@@ -204,5 +205,103 @@ void main() {
     expect(st.isCategoryCollapsed(lessonsId), isFalse);
     expect(find.text('数学'), findsOneWidget);
     expect(find.text('已折叠'), findsNothing);
+  });
+
+  /// Real file I/O only completes outside the fake-async zone, so the dialog
+  /// pumps are followed by a few interleaved real-time pumps.
+  Future<void> settleIo(WidgetTester tester, [int frames = 12]) async {
+    for (var i = 0; i < frames; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump(const Duration(milliseconds: 30));
+    }
+  }
+
+  testWidgets('the home edit mode is behind the parental password', (tester) async {
+    late String bookmarkId;
+    await tester.runAsync(() async {
+      await state.setParentalPassword('parent-2026');
+      final bookmark = await state.addBookmark(url: 'https://a.test/', title: '唯一');
+      bookmarkId = bookmark.id;
+    });
+
+    await pumpHome(tester);
+
+    // Locked by default: the wall has no per-tile controls at all.
+    expect(find.byKey(ValueKey<String>('edit-delete-$bookmarkId')), findsNothing);
+
+    await tester.tap(find.byKey(homeEditModeButtonKey));
+    await tester.pumpAndSettle();
+    expect(find.text('进入编辑模式'), findsWidgets);
+
+    // A wrong password keeps the mode shut.
+    await tester.enterText(find.byType(TextField), 'not-the-password');
+    await tester.tap(find.widgetWithText(FilledButton, '进入编辑模式'));
+    await tester.pumpAndSettle();
+    expect(find.text('密码不正确'), findsOneWidget);
+    expect(state.homeEditMode, isFalse);
+
+    // The right one opens it and shows the four actions.
+    await tester.enterText(find.byType(TextField), 'parent-2026');
+    await tester.tap(find.widgetWithText(FilledButton, '进入编辑模式'));
+    await tester.pumpAndSettle();
+
+    expect(state.homeEditMode, isTrue);
+    expect(find.byKey(ValueKey<String>('edit-rename-$bookmarkId')), findsOneWidget);
+    expect(find.byKey(ValueKey<String>('edit-move-$bookmarkId')), findsOneWidget);
+    expect(find.byKey(ValueKey<String>('edit-thumbnail-$bookmarkId')), findsOneWidget);
+    expect(find.byKey(ValueKey<String>('edit-delete-$bookmarkId')), findsOneWidget);
+
+    // 完成 leaves the mode.
+    await tester.tap(find.byKey(homeEditDoneKey));
+    await tester.pumpAndSettle();
+    expect(state.homeEditMode, isFalse);
+    expect(find.byKey(ValueKey<String>('edit-delete-$bookmarkId')), findsNothing);
+  });
+
+  testWidgets('edit mode renames, moves and deletes with the tile buttons', (
+    tester,
+  ) async {
+    late Bookmark bookmark;
+    late String newsId;
+    await tester.runAsync(() async {
+      final news = await state.addCategory('新闻');
+      newsId = news.id;
+      bookmark = await state.addBookmark(url: 'https://a.test/', title: '旧名字');
+      state.setHomeEditMode(true);
+    });
+
+    await pumpHome(tester);
+    final String id = bookmark.id;
+
+    // 编辑书签名
+    await tester.tap(find.byKey(ValueKey<String>('edit-rename-$id')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '新名字');
+    await tester.tap(find.widgetWithText(FilledButton, '保存'));
+    await tester.pumpAndSettle();
+    await settleIo(tester);
+    expect(state.bookmarks.single.title, '新名字');
+
+    // 变更分类
+    await tester.tap(find.byKey(ValueKey<String>('edit-move-$id')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(bookmarkTargetCategoryKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('新闻').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '移动'));
+    await tester.pumpAndSettle();
+    await settleIo(tester);
+    expect(state.bookmarksIn(newsId).single.title, '新名字');
+
+    // 删除书签
+    await tester.tap(find.byKey(ValueKey<String>('edit-delete-$id')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '删除'));
+    await tester.pumpAndSettle();
+    await settleIo(tester);
+    expect(state.bookmarks, isEmpty);
   });
 }

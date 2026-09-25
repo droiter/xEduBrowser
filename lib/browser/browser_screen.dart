@@ -40,6 +40,16 @@ class BrowserTab {
   bool canGoBack = false;
   bool canGoForward = false;
 
+  /// How many load commands this tab has sent for its current URL, including the
+  /// automatic retries from the shell's watchdog.
+  int loadAttempts = 0;
+
+  /// The URL the shell is still waiting for a verdict on (finished, failed or
+  /// blocked); null when nothing is outstanding. Drives the retry watchdog —
+  /// deliberately separate from [loading], which follows the native events and
+  /// only turns on once the page reports that it actually started.
+  String? awaitingUrl;
+
   /// Set when the policy refused this navigation; the body shows the block
   /// panel instead of the WebView until the tab navigates somewhere else.
   PolicyDecision? blocked;
@@ -67,6 +77,15 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
   /// Views with a capture in flight, so one slow screenshot is not queued twice.
   final Set<int> _thumbnailInFlight = <int>{};
+
+  /// One load watchdog per tab with a load in flight; see [_issueLoad].
+  final Map<int, Timer> _loadWatchdogs = <int, Timer>{};
+
+  /// How long a load may stay unfinished before it is sent again.
+  static const Duration _loadRetryAfter = Duration(seconds: 4);
+
+  /// Total load commands per navigation: the first one plus two retries.
+  static const int _maxLoadAttempts = 3;
 
   BrowserTab? get _active => _activeIndex >= 0 && _activeIndex < _tabs.length
       ? _tabs[_activeIndex]
@@ -99,6 +118,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
   @override
   void dispose() {
     unawaited(_eventSubscription?.cancel());
+    for (final timer in _loadWatchdogs.values) {
+      timer.cancel();
+    }
+    _loadWatchdogs.clear();
     super.dispose();
   }
 
@@ -106,6 +129,58 @@ class _BrowserScreenState extends State<BrowserScreen> {
     ...settings,
     'blockPageHtml': BlockPageTemplate.html,
   };
+
+  // ---------------------------------------------------------- loading
+
+  /// Sends a load command for [tab] and arms a watchdog for it.
+  ///
+  /// A page that is never reported finished used to leave the shell spinning
+  /// forever, with a blank body that only appeared after switching tabs. Two
+  /// things guard against that now: the first load is replayed by the controller
+  /// once the platform view actually exists (and has been laid out), and if
+  /// nothing comes back within [_loadRetryAfter] the load is sent again — which
+  /// also forces a relayout of the platform view, exactly what the tab switch
+  /// did by hand. After [_maxLoadAttempts] the spinner is cleared and the user is
+  /// told, instead of being left with a page that never arrives.
+  void _issueLoad(BrowserTab tab, String url, {bool reset = false}) {
+    if (reset) tab.loadAttempts = 0;
+    tab.loadAttempts++;
+    tab.awaitingUrl = url;
+    final int attempt = tab.loadAttempts;
+    _state?.logEvent(
+      'browser',
+      '${attempt == 1 ? '加载' : '重新加载（第 ${attempt - 1} 次重试）'}'
+          '视图 ${tab.viewId}：$url',
+      level: attempt == 1 ? LogLevel.info : LogLevel.warn,
+    );
+
+    unawaited(tab.controller.loadUrl(url));
+
+    _loadWatchdogs.remove(tab.viewId)?.cancel();
+    _loadWatchdogs[tab.viewId] = Timer(_loadRetryAfter, () {
+      _loadWatchdogs.remove(tab.viewId);
+      if (!mounted || tab.awaitingUrl != url) return;
+      if (tab.loadAttempts >= _maxLoadAttempts) {
+        _state?.logEvent(
+          'browser',
+          '视图 ${tab.viewId} 加载超时，已重试 ${tab.loadAttempts - 1} 次：$url',
+          level: LogLevel.error,
+        );
+        tab.awaitingUrl = null;
+        setState(() => tab.loading = false);
+        _snack('页面加载超时，请点刷新重试');
+        return;
+      }
+      _issueLoad(tab, url);
+    });
+  }
+
+  /// The page answered (finished, failed or was blocked): stop retrying.
+  void _clearLoadWatchdog(BrowserTab tab) {
+    _loadWatchdogs.remove(tab.viewId)?.cancel();
+    tab.loadAttempts = 0;
+    tab.awaitingUrl = null;
+  }
 
   // ------------------------------------------------------------- tabs
 
@@ -122,7 +197,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
     setState(() {});
     if (tab.url != UrlResolver.homeUrl) {
       // Queued until the platform view exists; see BrowserViewController.
-      unawaited(tab.controller.loadUrl(tab.url));
+      _issueLoad(tab, tab.url, reset: true);
     }
     return tab;
   }
@@ -134,7 +209,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
       return;
     }
     final tab = _tabs.removeAt(index);
+    _clearLoadWatchdog(tab);
     unawaited(BrowserBridge.disposeView(tab.viewId));
+    _state?.logEvent('browser', '关闭标签页：${tab.url}');
     if (_activeIndex >= _tabs.length) _activeIndex = _tabs.length - 1;
     setState(() {});
   }
@@ -199,8 +276,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
     });
 
     if (decision.allowed) {
-      unawaited(tab.controller.loadUrl(resolved.url));
+      _issueLoad(tab, resolved.url, reset: true);
     } else {
+      _clearLoadWatchdog(tab);
       _snack('已拦截：${decision.explanation}');
     }
   }
@@ -331,6 +409,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
     switch (event.type) {
       case 'pageStarted':
+        state.logEvent('browser', '页面开始加载（视图 ${event.viewId}）：${event.url}');
         setState(() {
           tab?.loading = true;
           tab?.progress = 0;
@@ -338,6 +417,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
           tab?.blocked = null;
         });
       case 'pageFinished':
+        state.logEvent('browser', '页面加载完成（视图 ${event.viewId}）：${event.url}');
+        if (tab != null) _clearLoadWatchdog(tab);
         setState(() {
           tab?.loading = false;
           tab?.progress = 100;
@@ -359,13 +440,24 @@ class _BrowserScreenState extends State<BrowserScreen> {
         });
       case 'navigationBlocked':
         state.handleNativeEvent(event.raw);
+        if (tab != null) _clearLoadWatchdog(tab);
         setState(() => tab?.loading = false);
         _snack('已按名单拦截：${event.explanation}');
       case 'requestBlocked':
         state.handleNativeEvent(event.raw);
       case 'newWindow':
-        if (event.url.isNotEmpty) _addTab(url: event.url);
+        if (event.url.isNotEmpty) {
+          state.logEvent('browser', '页面请求新窗口：${event.url}');
+          _addTab(url: event.url);
+        }
       case 'pageError':
+        state.logEvent(
+          'browser',
+          '页面加载失败（视图 ${event.viewId}，code=${event.errorCode}）：'
+              '${event.url} ${event.message}',
+          level: LogLevel.error,
+        );
+        if (tab != null) _clearLoadWatchdog(tab);
         setState(() => tab?.loading = false);
         if (event.message.isNotEmpty) {
           _snack('页面加载失败（${event.errorCode}）：${event.message}');
@@ -373,6 +465,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
       case 'downloadRequested':
         // The native layer only hands allowed URLs to the download manager,
         // and additionally emits requestBlocked for refused ones.
+        state.logEvent('browser', '下载请求：${event.url}（${event.allowed ? '允许' : '拦截'}）');
         _snack(event.allowed ? '开始下载：${event.url}' : '下载被名单拦截：${event.url}');
     }
   }
@@ -442,10 +535,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   if (tab == null) return;
                   if (tab.loading) {
                     unawaited(tab.controller.stop());
+                    _clearLoadWatchdog(tab);
+                    setState(() => tab.loading = false);
                   } else if (tab.url != UrlResolver.homeUrl) {
                     // Reload, or re-load when the view went away (going to the
                     // start page destroys it) — a plain reload would be dropped.
-                    unawaited(tab.controller.reloadOrLoad(tab.url));
+                    _issueLoad(tab, tab.url, reset: true);
                   }
                 },
                 onHome: () => _navigate(_homeUrl),
