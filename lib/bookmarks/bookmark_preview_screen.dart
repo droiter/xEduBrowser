@@ -10,6 +10,7 @@ import '../files/local_file_url.dart';
 import '../pdf/pdf_document.dart';
 import '../pdf/pdf_reader_screen.dart';
 import '../state/app_scope.dart';
+import 'bookmark.dart';
 import 'bookmark_dialog.dart';
 
 /// Test hook for the preview's 加为书签 action.
@@ -216,6 +217,27 @@ class _BookmarkPreviewScreenState extends State<BookmarkPreviewScreen> {
                 '${bookmark.whitelistPatterns.join('、')}'
           : '已添加书签「${bookmark.displayTitle}」（未加入白名单）',
     );
+
+    // The page is on screen right now, so take its picture here instead of
+    // leaving the new bookmark without a preview until it is opened again.
+    unawaited(_capturePreviewFor(bookmark));
+  }
+
+  /// Stores a screenshot of the page being previewed as [bookmark]'s tile image.
+  ///
+  /// The same sequence the browser uses when it refreshes a bookmark's preview:
+  /// give the first frame a moment, capture, and give up silently when the view
+  /// has nothing useful — the bookmark keeps its monogram in that case.
+  Future<void> _capturePreviewFor(Bookmark bookmark) async {
+    final state = AppScope.read(context);
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+    if (!mounted) return;
+    final bytes = await BrowserBridge.captureThumbnail(_viewId, maxWidth: 480);
+    if (bytes == null || bytes.isEmpty || !mounted) return;
+    // The preview may have navigated on, or the bookmark been deleted.
+    final current = state.bookmarkFor(bookmark.url);
+    if (current == null || current.id != bookmark.id) return;
+    await state.setBookmarkThumbnail(current, bytes);
   }
 
   void _snack(String message) {

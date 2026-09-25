@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tablet_browser/bookmarks/bookmark.dart';
 import 'package:tablet_browser/bookmarks/bookmark_dialog.dart';
 import 'package:tablet_browser/bookmarks/bookmark_manager.dart';
 import 'package:tablet_browser/bookmarks/bookmark_preview_screen.dart';
+import 'package:tablet_browser/bookmarks/category_dialogs.dart';
 import 'package:tablet_browser/policy/policy_config.dart';
 import 'package:tablet_browser/settings/settings_screen.dart';
 import 'package:tablet_browser/state/app_scope.dart';
@@ -224,5 +226,113 @@ void main() {
     expect(find.text('分类管理'), findsWidgets);
     expect(find.text('语文'), findsWidgets);
     expect(find.text('新建分类'), findsOneWidget);
+  });
+
+  testWidgets('the list can move a multi-selection into another category',
+      (tester) async {
+    late String lessonsId;
+    await tester.runAsync(() async {
+      final lessons = await state.addCategory('课程');
+      lessonsId = lessons.id;
+      await state.addBookmark(url: 'https://a.test/', title: 'A');
+      await state.addBookmark(url: 'https://b.test/', title: 'B');
+      await state.addBookmark(url: 'https://c.test/', title: 'C');
+    });
+
+    await pumpSettings(tester);
+
+    // Multi-select is opted into; a plain tap still renames.
+    await tester.tap(find.byKey(multiSelectBookmarksKey));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('已选 0 / 3'), findsOneWidget);
+
+    await tester.tap(find.byKey(selectAllBookmarksKey));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('已选 3 / 3'), findsOneWidget);
+
+    await tester.tap(find.byKey(moveSelectedBookmarksKey));
+    await tester.pumpAndSettle();
+    expect(find.byKey(bookmarkTargetCategoryKey), findsOneWidget);
+
+    await tester.tap(find.byKey(bookmarkTargetCategoryKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('课程').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '移动'));
+    // Wait for the batch to land *and* for the mode to close itself: the library
+    // is updated before the persist finishes, so the count alone is too early.
+    await waitFor(
+      tester,
+      () => state.bookmarksIn(lessonsId).length == 3 &&
+          find.textContaining('已选').evaluate().isEmpty,
+    );
+
+    // The whole selection arrived, in list order — the settings list shows the
+    // most recently added bookmark first, so C, B, A is that order — and the
+    // mode closed itself.
+    expect(state.bookmarksIn(lessonsId).map((b) => b.title), ['C', 'B', 'A']);
+    expect(state.bookmarksIn(uncategorizedId), isEmpty);
+    expect(find.textContaining('已选'), findsNothing);
+  });
+
+  testWidgets('the list can delete a multi-selection at once', (tester) async {
+    await tester.runAsync(() async {
+      await state.addBookmark(url: 'https://a.test/', title: 'A');
+      await state.addBookmark(url: 'https://b.test/', title: 'B');
+      await state.addBookmark(url: 'https://c.test/', title: 'C');
+    });
+
+    await pumpSettings(tester);
+    await tester.tap(find.byKey(multiSelectBookmarksKey));
+    await tester.pumpAndSettle();
+
+    // Tick only the first two rows, by tapping their tiles.
+    await tester.tap(find.text('A'));
+    await tester.tap(find.text('B'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('已选 2 / 3'), findsOneWidget);
+
+    await tester.tap(find.byKey(deleteSelectedBookmarksKey));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('确定删除选中的 2 个书签'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '删除 2 个'));
+    // As above: the library updates before the removal finishes and the mode
+    // closes, so wait for both.
+    await waitFor(
+      tester,
+      () => state.bookmarks.length == 1 &&
+          find.textContaining('已选').evaluate().isEmpty,
+    );
+
+    expect(state.bookmarks.map((b) => b.title), ['C']);
+    expect(find.textContaining('已选'), findsNothing);
+  });
+
+  testWidgets('deleting a category from the manager takes its bookmarks too',
+      (tester) async {
+    await tester.runAsync(() async {
+      final category = await state.addCategory('旧课程');
+      await state.addBookmark(
+        url: 'https://old.test/1',
+        title: '旧课',
+        categoryId: category.id,
+      );
+      await state.addBookmark(url: 'https://keep.test/2', title: '保留');
+    });
+
+    await pumpSettings(tester);
+    await tester.tap(find.byKey(manageCategoriesButtonKey));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('删除分类'));
+    await tester.pumpAndSettle();
+
+    // Deleting the bookmarks with the category is the default answer.
+    expect(find.text('同时删除该分类下的 1 个书签'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '删除分类'));
+    await waitFor(tester, () => state.categories.isEmpty);
+
+    expect(state.categories, isEmpty);
+    expect(state.bookmarks.map((b) => b.title), ['保留']);
   });
 }

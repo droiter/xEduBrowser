@@ -624,23 +624,52 @@ class AppState extends ChangeNotifier {
   Future<void> removeBookmark(
     Bookmark bookmark, {
     bool removeWhitelistRule = true,
+  }) =>
+      removeBookmarks([bookmark], removeWhitelistRule: removeWhitelistRule);
+
+  /// Removes a batch of bookmarks with a single write.
+  ///
+  /// Used by the settings list's multi-select delete: the [removeWhitelistRule]
+  /// rule and the preview cleanup are exactly those of [removeBookmark], only
+  /// done once for the whole selection so a twenty-bookmark delete is not twenty
+  /// file writes.
+  Future<void> removeBookmarks(
+    Iterable<Bookmark> bookmarks, {
+    bool removeWhitelistRule = true,
   }) async {
-    final patterns = bookmark.whitelistPatterns;
+    final ids = {for (final bookmark in bookmarks) bookmark.id};
+    if (ids.isEmpty) return;
+    final removed = [
+      for (final bookmark in _library.bookmarks)
+        if (ids.contains(bookmark.id)) bookmark,
+    ];
+    if (removed.isEmpty) return;
+
     _library = BookmarkLibrary(
       categories: _library.categories,
       bookmarks: [
-        for (final other in _library.bookmarks)
-          if (other.id != bookmark.id) other,
+        for (final bookmark in _library.bookmarks)
+          if (!ids.contains(bookmark.id)) bookmark,
       ],
     );
-    await bookmarkStore.deleteThumbnail(bookmark.thumbnailPath);
+    await _finishRemoval(removed, removeWhitelistRule: removeWhitelistRule);
+  }
 
+  /// Deletes the previews of already-removed bookmarks, drops the whitelist
+  /// entries nobody else needs any more, then notifies and persists once.
+  Future<void> _finishRemoval(
+    List<Bookmark> removed, {
+    required bool removeWhitelistRule,
+  }) async {
+    for (final bookmark in removed) {
+      await bookmarkStore.deleteThumbnail(bookmark.thumbnailPath);
+    }
     if (removeWhitelistRule) {
+      final patterns = {for (final bookmark in removed) ...bookmark.whitelistPatterns};
       for (final pattern in patterns) {
         await _removeWhitelistRuleIfUnused(pattern);
       }
     }
-
     notifyListeners();
     await _persistBookmarks();
   }
@@ -761,9 +790,33 @@ class AppState extends ChangeNotifier {
     await _persistBookmarks();
   }
 
-  /// Deletes a category. Its bookmarks are **not** deleted: they move to
-  /// 未分类, keeping their relative order, so a mis-tap never loses data.
-  Future<void> removeCategory(BookmarkCategory category) async {
+  /// Deletes a category.
+  ///
+  /// By default its bookmarks are **not** deleted: they move to 未分类, keeping
+  /// their relative order, so a mis-tap never loses data. With
+  /// [deleteBookmarks] the category and everything filed under it go together —
+  /// what the 分类管理 sheet offers — and the previews and now-unused whitelist
+  /// entries of those bookmarks are cleaned up as well.
+  Future<void> removeCategory(
+    BookmarkCategory category, {
+    bool deleteBookmarks = false,
+  }) async {
+    if (deleteBookmarks) {
+      final children = _library.bookmarksIn(category.id);
+      _library = BookmarkLibrary(
+        categories: [
+          for (final existing in _library.categories)
+            if (existing.id != category.id) existing,
+        ],
+        bookmarks: [
+          for (final bookmark in _library.bookmarks)
+            if (bookmark.categoryId != category.id) bookmark,
+        ],
+      );
+      await _finishRemoval(children, removeWhitelistRule: true);
+      return;
+    }
+
     final moved = _library.bookmarksIn(category.id);
     final orphaned = [
       for (var i = 0; i < moved.length; i++)
@@ -834,6 +887,73 @@ class AppState extends ChangeNotifier {
     );
     notifyListeners();
     await _persistBookmarks();
+  }
+
+  /// Moves several bookmarks into [categoryId] with a single write, appending
+  /// them in the order the caller listed them.
+  ///
+  /// Used by the settings list's multi-select move: the bookmarks keep the order
+  /// they had in the list, and every category they left or entered is renumbered
+  /// contiguously, exactly like [moveBookmark] does for one bookmark.
+  Future<void> moveBookmarksToCategory(
+    Iterable<Bookmark> bookmarks, {
+    required String categoryId,
+  }) async {
+    final known = {for (final bookmark in _library.bookmarks) bookmark.id: bookmark};
+    final moving = <Bookmark>[];
+    final seen = <String>{};
+    for (final bookmark in bookmarks) {
+      final current = known[bookmark.id];
+      if (current == null || !seen.add(current.id)) continue;
+      moving.add(current);
+    }
+    if (moving.isEmpty) return;
+
+    final movingIds = {for (final bookmark in moving) bookmark.id};
+    final target = [
+      for (final bookmark in _library.bookmarksIn(categoryId))
+        if (!movingIds.contains(bookmark.id)) bookmark,
+    ];
+    final updated = <Bookmark>[
+      for (var i = 0; i < target.length; i++) target[i].copyWith(order: i),
+      for (var i = 0; i < moving.length; i++)
+        moving[i].copyWith(categoryId: categoryId, order: target.length + i),
+    ];
+
+    for (final sourceId in {
+      for (final bookmark in moving)
+        if (bookmark.categoryId != categoryId) bookmark.categoryId,
+    }) {
+      final rest = [
+        for (final bookmark in _library.bookmarksIn(sourceId))
+          if (!movingIds.contains(bookmark.id)) bookmark,
+      ];
+      for (var i = 0; i < rest.length; i++) {
+        updated.add(rest[i].copyWith(order: i));
+      }
+    }
+
+    await _replaceBookmarks(updated);
+  }
+
+  // ---------------------------------------------------------- display state
+
+  /// Categories whose home-page section is folded shut.
+  ///
+  /// Pure view state, deliberately not persisted: a restart shows the whole wall
+  /// again, and no parent can be confused by a category that "vanished" after an
+  /// update.
+  final Set<String> _collapsedCategories = <String>{};
+
+  bool isCategoryCollapsed(String categoryId) =>
+      _collapsedCategories.contains(categoryId);
+
+  /// Folds a category section shut, or opens it again.
+  void toggleCategoryCollapsed(String categoryId) {
+    if (!_collapsedCategories.remove(categoryId)) {
+      _collapsedCategories.add(categoryId);
+    }
+    notifyListeners();
   }
 
   // --------------------------------------------------------------- import

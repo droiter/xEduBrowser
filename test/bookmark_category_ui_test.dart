@@ -170,4 +170,39 @@ void main() {
     expect(find.text('还没有书签的分类'), findsNothing);
   });
 
+  testWidgets('a category folds shut without hiding the others', (tester) async {
+    late AppState st;
+    late String lessonsId;
+    await tester.runAsync(() async {
+      final lessons = await state.addCategory('课程');
+      final news = await state.addCategory('新闻');
+      lessonsId = lessons.id;
+      await state.addBookmark(
+          url: 'https://math.test/', title: '数学', categoryId: lessons.id);
+      await state.addBookmark(
+          url: 'https://news.test/', title: '日报', categoryId: news.id);
+      st = state;
+    });
+
+    await pumpHome(tester);
+    expect(find.text('数学'), findsOneWidget);
+
+    // The header itself is the toggle.
+    await tester.tap(find.byKey(ValueKey<String>('bookmark-section-$lessonsId')));
+    await tester.pumpAndSettle();
+
+    expect(st.isCategoryCollapsed(lessonsId), isTrue);
+    expect(find.text('数学'), findsNothing, reason: '折叠后不构建设方块');
+    expect(find.text('已折叠'), findsOneWidget);
+    // The header stays, with its count, and the other category is untouched.
+    expect(find.text('课程'), findsWidgets);
+    expect(find.text('日报'), findsOneWidget);
+
+    await tester.tap(find.byKey(ValueKey<String>('bookmark-section-$lessonsId')));
+    await tester.pumpAndSettle();
+
+    expect(st.isCategoryCollapsed(lessonsId), isFalse);
+    expect(find.text('数学'), findsOneWidget);
+    expect(find.text('已折叠'), findsNothing);
+  });
 }

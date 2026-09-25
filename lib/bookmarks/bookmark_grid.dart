@@ -10,8 +10,10 @@ import 'bookmark.dart';
 /// tiles with the title underneath.
 ///
 /// Tiles can be dragged onto one another to change their order inside a
-/// category, and dragged from one category into another. There is deliberately
-/// no add/delete control here — bookmarks are managed in the settings screen.
+/// category, and dragged from one category into another. A section header folds
+/// its category shut, so a wall with several subjects fits on one screen. There
+/// is deliberately no add/delete control here — bookmarks are managed in the
+/// settings screen.
 class BookmarkGrid extends StatelessWidget {
   const BookmarkGrid({super.key, required this.onOpen});
 
@@ -39,7 +41,11 @@ class BookmarkGrid extends StatelessWidget {
   }
 }
 
-/// One category: a header plus its tiles.
+/// One category: a foldable header plus, while it is open, its tiles.
+///
+/// The fold state lives in [AppState] (in memory) rather than in this widget, so
+/// it survives every rebuild of the wall — a tile reorder or a settings visit
+/// does not pop the categories back open.
 class _CategorySection extends StatelessWidget {
   const _CategorySection({
     required this.state,
@@ -56,44 +62,78 @@ class _CategorySection extends StatelessWidget {
     final theme = Theme.of(context);
     final bookmarks = state.bookmarksIn(categoryId);
     final label = state.categoryLabel(categoryId);
+    final collapsed = state.isCategoryCollapsed(categoryId);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Text(
-              label,
-              style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+        Tooltip(
+          message: collapsed ? '展开这个分类' : '折叠这个分类',
+          child: InkWell(
+            key: ValueKey<String>('bookmark-section-$categoryId'),
+            onTap: () => state.toggleCategoryCollapsed(categoryId),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+              child: Row(
+                children: [
+                  Icon(
+                    collapsed ? Icons.chevron_right : Icons.expand_more,
+                    size: 20,
+                    color: theme.hintColor,
+                  ),
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${bookmarks.length}',
+                    style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
+                  ),
+                  if (collapsed) ...[
+                    const SizedBox(width: 8),
+                    Text(
+                      '已折叠',
+                      style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
+                    ),
+                  ],
+                ],
+              ),
             ),
-            const SizedBox(width: 8),
-            Text(
-              '${bookmarks.length}',
-              style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: 190,
-            mainAxisSpacing: 18,
-            crossAxisSpacing: 16,
-            // Taller than wide: the square thumbnail plus its caption below.
-            childAspectRatio: 0.76,
           ),
-          itemCount: bookmarks.length,
-          itemBuilder: (context, index) {
-            final bookmark = bookmarks[index];
-            return BookmarkTile(
-              bookmark: bookmark,
-              onOpen: () => onOpen(bookmark.url),
-              onReorderOnto: (dragged) => _dropOn(state, dragged, bookmark),
-            );
-          },
         ),
+        // The tiles are not built at all while folded: a folded wall of a hundred
+        // bookmarks costs nothing to lay out.
+        if (!collapsed) ...[
+          const SizedBox(height: 10),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: 190,
+              mainAxisSpacing: 18,
+              crossAxisSpacing: 16,
+              // Taller than wide: the square thumbnail plus its caption below.
+              childAspectRatio: 0.76,
+            ),
+            itemCount: bookmarks.length,
+            itemBuilder: (context, index) {
+              final bookmark = bookmarks[index];
+              return BookmarkTile(
+                bookmark: bookmark,
+                onOpen: () => onOpen(bookmark.url),
+                onReorderOnto: (dragged) => _dropOn(state, dragged, bookmark),
+              );
+            },
+          ),
+        ],
       ],
     );
   }

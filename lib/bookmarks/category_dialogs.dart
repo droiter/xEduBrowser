@@ -27,6 +27,10 @@ const String _newCategoryValue = '\u0000new-category';
 /// Test hook for the import dialog's 标题来源 dropdown.
 const Key importTitleSourceKey = ValueKey<String>('import-title-source');
 
+/// Test hook for the multi-select 移动 dialog's target-category dropdown.
+const Key bookmarkTargetCategoryKey =
+    ValueKey<String>('bookmark-target-category');
+
 /// Test hook for the post-import 重名 report.
 const Key importNameConflictDialogKey =
     ValueKey<String>('import-name-conflict-dialog');
@@ -47,21 +51,45 @@ Future<String?> showCategoryNameDialog(
       ),
     );
 
-/// Confirmation before deleting a category. Returns true to proceed.
+/// What the user chose when deleting a category.
+class CategoryDeleteChoice {
+  const CategoryDeleteChoice({required this.deleteBookmarks});
+
+  /// Whether the bookmarks filed under the category are deleted with it. When
+  /// false they move to 未分类 instead.
+  final bool deleteBookmarks;
+}
+
+/// Confirmation before deleting a category.
 ///
-/// Deleting a category never deletes bookmarks: they move to 未分类, which is
-/// what this dialog has to make obvious before the user commits.
-Future<bool?> confirmCategoryDelete(
+/// The category's bookmarks go with it unless the user unticks the box — the
+/// destructive answer is the default, because "删掉这个分类" usually means the
+/// whole shelf, while the untick keeps the older move-to-未分类 escape hatch.
+Future<CategoryDeleteChoice?> confirmCategoryDelete(
   BuildContext context, {
   required BookmarkCategory category,
   required int bookmarkCount,
 }) =>
-    showDialog<bool>(
+    showDialog<CategoryDeleteChoice>(
       context: context,
       builder: (context) => _CategoryDeleteDialog(
         category: category,
         bookmarkCount: bookmarkCount,
       ),
+    );
+
+/// Picks the category a multi-selection of bookmarks should move into.
+///
+/// Returns the target category id (which may be [uncategorizedId]), or null on
+/// cancel. 新建分类… creates the category through [showCategoryNameDialog]
+/// first, exactly like the import dialog's target dropdown.
+Future<String?> showBookmarkTargetCategoryDialog(
+  BuildContext context, {
+  required int bookmarkCount,
+}) =>
+    showDialog<String>(
+      context: context,
+      builder: (context) => _TargetCategoryDialog(bookmarkCount: bookmarkCount),
     );
 
 /// The directory-import flow. Scans [directoryPath], shows a preview, imports
@@ -134,12 +162,16 @@ Future<void> showCategoryManagerSheet(BuildContext context) {
                       tooltip: '删除分类',
                       icon: const Icon(Icons.delete_outline),
                       onPressed: () async {
-                        final confirmed = await confirmCategoryDelete(
+                        final choice = await confirmCategoryDelete(
                           sheetContext,
                           category: category,
                           bookmarkCount: state.bookmarksIn(category.id).length,
                         );
-                        if (confirmed == true) await state.removeCategory(category);
+                        if (choice == null) return;
+                        await state.removeCategory(
+                          category,
+                          deleteBookmarks: choice.deleteBookmarks,
+                        );
                       },
                     ),
                   ],
@@ -259,8 +291,11 @@ class _CategoryNameDialogState extends State<_CategoryNameDialog> {
 
 // ------------------------------------------------------------- delete dialog
 
-/// Confirms deleting a category, spelling out that its bookmarks survive.
-class _CategoryDeleteDialog extends StatelessWidget {
+/// Confirms deleting a category, defaulting to deleting its bookmarks too.
+///
+/// The count and the untick box are both spelled out, because the difference
+/// between "分类没了，书签还在未分类" and "书签一起没了" is the whole decision.
+class _CategoryDeleteDialog extends StatefulWidget {
   const _CategoryDeleteDialog({
     required this.category,
     required this.bookmarkCount,
@@ -270,22 +305,43 @@ class _CategoryDeleteDialog extends StatelessWidget {
   final int bookmarkCount;
 
   @override
+  State<_CategoryDeleteDialog> createState() => _CategoryDeleteDialogState();
+}
+
+class _CategoryDeleteDialogState extends State<_CategoryDeleteDialog> {
+  /// Destructive by default: "删除这个分类" reads as "remove the whole shelf".
+  bool _deleteBookmarks = true;
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final count = widget.bookmarkCount;
     return AlertDialog(
       title: const Text('删除分类'),
       content: SizedBox(
-        width: 420,
+        width: 460,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('确定删除分类「${category.name}」吗？'),
+            Text('确定删除分类「${widget.category.name}」吗？'),
             const SizedBox(height: 10),
-            if (bookmarkCount > 0)
-              Text('该分类下的 $bookmarkCount 个书签不会被删除，它们会移动到「$uncategorizedLabel」。')
+            if (count == 0)
+              const Text('该分类下没有书签。')
             else
-              const Text('该分类下没有书签。'),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _deleteBookmarks,
+                onChanged: (value) =>
+                    setState(() => _deleteBookmarks = value ?? false),
+                title: Text('同时删除该分类下的 $count 个书签'),
+                subtitle: Text(
+                  _deleteBookmarks
+                      ? '这些书签和它们的预览图会一起删除，无法撤销。'
+                      : '这些书签会移动到「$uncategorizedLabel」，不会被删除。',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
             const SizedBox(height: 8),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -315,8 +371,114 @@ class _CategoryDeleteDialog extends StatelessWidget {
             backgroundColor: theme.colorScheme.error,
             foregroundColor: theme.colorScheme.onError,
           ),
-          onPressed: () => Navigator.of(context).pop(true),
+          onPressed: () => Navigator.of(context).pop(
+            CategoryDeleteChoice(
+              deleteBookmarks: count > 0 && _deleteBookmarks,
+            ),
+          ),
           child: const Text('删除分类'),
+        ),
+      ],
+    );
+  }
+}
+
+// ------------------------------------------------------ target-category dialog
+
+/// The category dropdown of the multi-select 移动 action.
+class _TargetCategoryDialog extends StatefulWidget {
+  const _TargetCategoryDialog({required this.bookmarkCount});
+
+  final int bookmarkCount;
+
+  @override
+  State<_TargetCategoryDialog> createState() => _TargetCategoryDialogState();
+}
+
+class _TargetCategoryDialogState extends State<_TargetCategoryDialog> {
+  String _categoryId = uncategorizedId;
+
+  /// Handles the dropdown, including its 新建分类… entry: picking it creates the
+  /// category through the same name prompt the rest of the app uses, then
+  /// selects it. A cancelled or empty name leaves the previous choice alone.
+  Future<void> _onSelected(String? value) async {
+    if (value == null) return;
+    if (value != _newCategoryValue) {
+      setState(() => _categoryId = value);
+      return;
+    }
+    final state = AppScope.read(context);
+    final name = await showCategoryNameDialog(context, title: '新建分类');
+    if (!mounted) return;
+    if (name == null || name.trim().isEmpty) {
+      setState(() {});
+      return;
+    }
+    final created = await state.addCategory(name);
+    if (!mounted) return;
+    setState(() => _categoryId = created.id);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final categories = AppScope.of(context).categories;
+    // A selection whose category disappeared must not be handed to the
+    // dropdown: DropdownButton asserts when its value has no matching item.
+    final known = categories.any((category) => category.id == _categoryId);
+    final selected =
+        _categoryId == uncategorizedId || known ? _categoryId : uncategorizedId;
+
+    return AlertDialog(
+      title: Text('移动 ${widget.bookmarkCount} 个书签'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            DropdownButtonFormField<String>(
+              key: bookmarkTargetCategoryKey,
+              initialValue: selected,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: '目标分类',
+                border: OutlineInputBorder(),
+              ),
+              items: [
+                const DropdownMenuItem<String>(
+                  value: uncategorizedId,
+                  child: Text(uncategorizedLabel),
+                ),
+                for (final category in categories)
+                  DropdownMenuItem<String>(
+                    value: category.id,
+                    child: Text(category.name),
+                  ),
+                const DropdownMenuItem<String>(
+                  value: _newCategoryValue,
+                  child: Text('＋ 新建分类…'),
+                ),
+              ],
+              onChanged: (value) => unawaited(_onSelected(value)),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '选中的书签会按当前顺序追加到该分类，之后仍可拖动调整。',
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton.icon(
+          onPressed: () => Navigator.of(context).pop(selected),
+          icon: const Icon(Icons.drive_file_move_outline, size: 18),
+          label: const Text('移动'),
         ),
       ],
     );

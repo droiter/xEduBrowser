@@ -90,6 +90,44 @@ Future<bool?> confirmBookmarkDelete(
   );
 }
 
+/// Confirmation for the multi-select delete.
+///
+/// Simpler than [confirmBookmarkDelete]: there is one answer for the whole
+/// batch, and the whitelist entries those bookmarks brought are always cleaned
+/// up unless another bookmark still needs them.
+Future<bool?> confirmBookmarkBulkDelete(
+  BuildContext context, {
+  required int count,
+}) =>
+    showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除书签'),
+        content: SizedBox(
+          width: 420,
+          child: Text(
+            '确定删除选中的 $count 个书签吗？\n\n'
+            '它们带来的白名单条目会一并清理；如果某个条目仍被其他书签使用，'
+            '则会保留。',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('删除 $count 个'),
+          ),
+        ],
+      ),
+    );
+
 /// The form for adding or editing a bookmark.
 ///
 /// A StatefulWidget rather than a `StatefulBuilder`, so the text controllers

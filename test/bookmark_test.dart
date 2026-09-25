@@ -417,6 +417,29 @@ void main() {
       expect(state.decideUrl('https://school.test/b').allowed, isTrue);
       expect(state.decideUrl('https://school.test/a').allowed, isTrue);
     });
+
+    test('a whole selection is removed in one go, rules included', () async {
+      final a = await state.addBookmark(url: 'https://a.test/x', title: 'A');
+      final b = await state.addBookmark(url: 'https://b.test/y', title: 'B');
+      await state.addBookmark(url: 'https://c.test/z', title: 'C');
+
+      await state.removeBookmarks([a, b]);
+
+      expect(state.bookmarks.map((bookmark) => bookmark.title), ['C']);
+      final patterns = {
+        for (final rule in state.policy.rulesOf(PolicyListKind.whitelist)) rule.pattern,
+      };
+      expect(patterns, {'https://c.test/z', 'https://c.test'});
+      expect(state.decideUrl('https://a.test/x').allowed, isFalse,
+          reason: '被删书签的规则已移除');
+      expect(state.decideUrl('https://c.test/z').allowed, isTrue);
+    });
+
+    test('an empty selection changes nothing', () async {
+      await state.addBookmark(url: 'https://a.test/x', title: 'A');
+      await state.removeBookmarks(const []);
+      expect(state.bookmarks, hasLength(1));
+    });
   });
 
   group('editing a bookmark', () {

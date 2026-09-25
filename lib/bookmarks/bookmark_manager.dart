@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -5,32 +6,113 @@ import 'package:flutter/material.dart';
 import '../browser/url_input.dart';
 import '../files/local_file_url.dart';
 import '../files/local_files_screen.dart';
+import '../pdf/pdf_document.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../ui/theme.dart';
 import 'bookmark.dart';
 import 'bookmark_dialog.dart';
 import 'category_dialogs.dart';
+import 'thumbnail_capture.dart';
 
 /// Stable test hooks for the settings-screen bookmark controls.
 const Key addBookmarkButtonKey = ValueKey<String>('settings-add-bookmark');
 const Key importBookmarksButtonKey = ValueKey<String>('settings-import-bookmarks');
 const Key manageCategoriesButtonKey = ValueKey<String>('settings-manage-categories');
 
+/// Test hooks for the multi-select mode of the bookmark list.
+const Key multiSelectBookmarksKey = ValueKey<String>('settings-bookmarks-multiselect');
+const Key selectAllBookmarksKey = ValueKey<String>('settings-bookmarks-select-all');
+const Key moveSelectedBookmarksKey = ValueKey<String>('settings-bookmarks-move');
+const Key deleteSelectedBookmarksKey = ValueKey<String>('settings-bookmarks-delete');
+
 /// The 书签 card of the settings screen: add a bookmark, import a directory of
-/// local pages, manage categories, and edit/delete the bookmarks that exist.
+/// local pages, manage categories, and edit/delete/move the bookmarks that
+/// exist — one at a time or as a multi-selection.
 ///
 /// The home page shows bookmarks only, so every management action lives here.
 /// Adding a bookmark grants the address **and** the site (or local folder) that
 /// contains it — see [AppState.addBookmark].
-class BookmarkManagerCard extends StatelessWidget {
+class BookmarkManagerCard extends StatefulWidget {
   const BookmarkManagerCard({super.key});
+
+  @override
+  State<BookmarkManagerCard> createState() => _BookmarkManagerCardState();
+}
+
+class _BookmarkManagerCardState extends State<BookmarkManagerCard> {
+  /// Whether the list is in multi-select mode.
+  ///
+  /// Off by default: a plain tap keeps renaming a bookmark, so bulk actions are
+  /// something the user opts into rather than a mode they can fall into.
+  bool _selecting = false;
+
+  /// Ids of the ticked bookmarks; only meaningful while [_selecting].
+  final Set<String> _selected = <String>{};
+
+  void _setSelecting(bool value) {
+    setState(() {
+      _selecting = value;
+      _selected.clear();
+    });
+  }
+
+  void _toggleSelected(String id) {
+    setState(() {
+      if (!_selected.remove(id)) _selected.add(id);
+    });
+  }
+
+  void _selectAll(bool allSelected) {
+    setState(() {
+      _selected.clear();
+      if (allSelected) return;
+      _selected.addAll(AppScope.read(context).bookmarks.map((b) => b.id));
+    });
+  }
+
+  /// The bookmarks of the current selection, in list order.
+  List<Bookmark> _chosen(AppState state, Set<String> selected) => [
+        for (final bookmark in state.bookmarks)
+          if (selected.contains(bookmark.id)) bookmark,
+      ];
+
+  Future<void> _deleteSelected(AppState state, Set<String> selected) async {
+    final chosen = _chosen(state, selected);
+    if (chosen.isEmpty) return;
+    final confirmed = await confirmBookmarkBulkDelete(context, count: chosen.length);
+    if (confirmed != true || !mounted) return;
+    await state.removeBookmarks(chosen);
+    if (!mounted) return;
+    _setSelecting(false);
+    showAppSnackBar(context, '已删除 ${chosen.length} 个书签');
+  }
+
+  Future<void> _moveSelected(AppState state, Set<String> selected) async {
+    final chosen = _chosen(state, selected);
+    if (chosen.isEmpty) return;
+    final target = await showBookmarkTargetCategoryDialog(
+      context,
+      bookmarkCount: chosen.length,
+    );
+    if (target == null || !mounted) return;
+    await state.moveBookmarksToCategory(chosen, categoryId: target);
+    if (!mounted) return;
+    _setSelecting(false);
+    showAppSnackBar(
+      context,
+      '已把 ${chosen.length} 个书签移动到「${state.categoryLabel(target)}」',
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     final theme = Theme.of(context);
     final bookmarks = state.bookmarks;
+    // A bookmark deleted elsewhere must not stay counted in the selection.
+    final selected = _selected.intersection({for (final b in bookmarks) b.id});
+    final allSelected = bookmarks.isNotEmpty && selected.length == bookmarks.length;
 
     return SectionCard(
       title: '书签',
@@ -65,8 +147,24 @@ class BookmarkManagerCard extends StatelessWidget {
               icon: const Icon(Icons.folder_outlined),
               label: const Text('分类管理'),
             ),
+            if (bookmarks.isNotEmpty)
+              OutlinedButton.icon(
+                key: multiSelectBookmarksKey,
+                onPressed: () => _setSelecting(!_selecting),
+                icon: Icon(_selecting ? Icons.close : Icons.checklist_outlined),
+                label: Text(_selecting ? '退出多选' : '多选'),
+              ),
           ],
         ),
+        if (_selecting)
+          _SelectionBar(
+            total: bookmarks.length,
+            selected: selected.length,
+            allSelected: allSelected,
+            onSelectAll: () => _selectAll(allSelected),
+            onMove: selected.isEmpty ? null : () => _moveSelected(state, selected),
+            onDelete: selected.isEmpty ? null : () => _deleteSelected(state, selected),
+          ),
         const SizedBox(height: 8),
         if (bookmarks.isEmpty)
           Text(
@@ -80,6 +178,9 @@ class BookmarkManagerCard extends StatelessWidget {
               key: ValueKey<String>('bookmark-row-${bookmark.id}'),
               state: state,
               bookmark: bookmark,
+              selecting: _selecting,
+              selected: selected.contains(bookmark.id),
+              onToggleSelected: () => _toggleSelected(bookmark.id),
             ),
       ],
     );
@@ -143,6 +244,38 @@ class BookmarkManagerCard extends StatelessWidget {
           ? '已添加书签「${bookmark.displayTitle}」，网址与所在站点已加入白名单'
           : '已添加书签「${bookmark.displayTitle}」（未加入白名单）',
     );
+
+    // Take the tile's picture right away instead of waiting for the page to be
+    // opened once. Fire-and-forget: the bookmark is already saved, and the
+    // capture reports its own outcome.
+    unawaited(_captureAddedPreview(state, bookmark));
+  }
+
+  /// Generates the preview image of a freshly added bookmark.
+  ///
+  /// The page is loaded in a throwaway WebView (see [captureThumbnailFor]) so the
+  /// home page shows the real page immediately, rather than the generated
+  /// monogram until the bookmark is opened for the first time. A failed capture
+  /// changes nothing: the bookmark keeps its monogram and the usual first-open
+  /// capture still fills the preview in later.
+  Future<void> _captureAddedPreview(AppState state, Bookmark bookmark) async {
+    if (!mounted) return;
+    // A PDF is read page by page by the built-in reader and Android's WebView
+    // cannot render one, so there is nothing to photograph — and nothing to
+    // promise the user either.
+    if (PdfDocuments.localPathOf(bookmark.url) != null) return;
+    final bytes = await captureThumbnailFor(context, url: bookmark.url);
+    if (!mounted) return;
+    if (bytes == null || bytes.isEmpty) {
+      showAppSnackBar(context, '暂时截不到预览图，打开该页面时会自动生成');
+      return;
+    }
+    // The bookmark may have been deleted while the page was loading.
+    final current = state.bookmarkFor(bookmark.url);
+    if (current == null || current.id != bookmark.id) return;
+    await state.setBookmarkThumbnail(current, bytes);
+    if (!mounted) return;
+    showAppSnackBar(context, '已生成「${current.displayTitle}」的预览图');
   }
 
   /// Picks a directory and imports every HTML page found in it and in its
@@ -178,12 +311,88 @@ class BookmarkManagerCard extends StatelessWidget {
   }
 }
 
+/// The bar shown in multi-select mode: how much is ticked, and what can be done
+/// with it. A [Wrap] rather than a Row so the actions fold onto a second line on
+/// a narrow settings pane instead of overflowing.
+class _SelectionBar extends StatelessWidget {
+  const _SelectionBar({
+    required this.total,
+    required this.selected,
+    required this.allSelected,
+    required this.onSelectAll,
+    required this.onMove,
+    required this.onDelete,
+  });
+
+  final int total;
+  final int selected;
+  final bool allSelected;
+  final VoidCallback onSelectAll;
+
+  /// Null while nothing is ticked, which disables the batch actions.
+  final VoidCallback? onMove;
+  final VoidCallback? onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primaryContainer.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Wrap(
+        spacing: 4,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text('已选 $selected / $total 个', style: theme.textTheme.bodyMedium),
+          TextButton(
+            key: selectAllBookmarksKey,
+            onPressed: onSelectAll,
+            child: Text(allSelected ? '取消全选' : '全选'),
+          ),
+          TextButton.icon(
+            key: moveSelectedBookmarksKey,
+            onPressed: onMove,
+            icon: const Icon(Icons.drive_file_move_outline, size: 18),
+            label: const Text('移动到分类'),
+          ),
+          TextButton.icon(
+            key: deleteSelectedBookmarksKey,
+            onPressed: onDelete,
+            icon: const Icon(Icons.delete_outline, size: 18),
+            label: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// One bookmark in the settings list, with its own ⋮ actions.
+///
+/// In multi-select mode the ⋮ menu gives way to a checkbox and a tap ticks the
+/// row; outside it, a tap renames the bookmark, exactly as before.
 class _BookmarkRow extends StatelessWidget {
-  const _BookmarkRow({super.key, required this.state, required this.bookmark});
+  const _BookmarkRow({
+    super.key,
+    required this.state,
+    required this.bookmark,
+    this.selecting = false,
+    this.selected = false,
+    this.onToggleSelected,
+  });
 
   final AppState state;
   final Bookmark bookmark;
+
+  /// Multi-select mode is on: the row shows a checkbox and toggles on tap.
+  final bool selecting;
+  final bool selected;
+  final VoidCallback? onToggleSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -194,9 +403,24 @@ class _BookmarkRow extends StatelessWidget {
 
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      leading: _Preview(
-        path: thumbnail,
-        fallback: Icon(local ? Icons.insert_drive_file_outlined : Icons.public),
+      selected: selecting && selected,
+      selectedTileColor: theme.colorScheme.primaryContainer.withValues(alpha: 0.25),
+      leading: SizedBox(
+        width: selecting ? 92 : 44,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (selecting)
+              Checkbox(
+                value: selected,
+                onChanged: (_) => onToggleSelected?.call(),
+              ),
+            _Preview(
+              path: thumbnail,
+              fallback: Icon(local ? Icons.insert_drive_file_outlined : Icons.public),
+            ),
+          ],
+        ),
       ),
       title: Text(bookmark.displayTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Column(
@@ -218,22 +442,26 @@ class _BookmarkRow extends StatelessWidget {
           const SizedBox(height: 2),
           Text(
             thumbnail == null || thumbnail.isEmpty
-                ? '预览图：打开该页面后自动生成'
+                ? (PdfDocuments.localPathOf(bookmark.url) != null
+                    ? '预览图：PDF 不生成预览图'
+                    : '预览图：还没生成，打开该页面即可生成')
                 : '预览图：已生成，打开该页面会刷新',
             style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
           ),
         ],
       ),
-      trailing: PopupMenuButton<String>(
-        tooltip: '书签操作',
-        onSelected: (value) => _onAction(context, value),
-        itemBuilder: (context) => const <PopupMenuEntry<String>>[
-          PopupMenuItem<String>(value: 'rename', child: Text('修改标题')),
-          PopupMenuItem<String>(value: 'edit', child: Text('分类与白名单')),
-          PopupMenuItem<String>(value: 'delete', child: Text('删除书签')),
-        ],
-      ),
-      onTap: () => _onAction(context, 'rename'),
+      trailing: selecting
+          ? null
+          : PopupMenuButton<String>(
+              tooltip: '书签操作',
+              onSelected: (value) => _onAction(context, value),
+              itemBuilder: (context) => const <PopupMenuEntry<String>>[
+                PopupMenuItem<String>(value: 'rename', child: Text('修改标题')),
+                PopupMenuItem<String>(value: 'edit', child: Text('分类与白名单')),
+                PopupMenuItem<String>(value: 'delete', child: Text('删除书签')),
+              ],
+            ),
+      onTap: selecting ? onToggleSelected : () => _onAction(context, 'rename'),
     );
   }
 

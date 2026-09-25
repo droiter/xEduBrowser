@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tablet_browser/bookmarks/bookmark.dart';
+import 'package:tablet_browser/policy/policy_config.dart';
 import 'package:tablet_browser/state/app_state.dart';
 
 /// Categories, ordering inside a category, and the version 1 -> 2 upgrade of
@@ -65,6 +66,50 @@ void main() {
       // the ones that were already uncategorized.
       expect(uncategorized.map((b) => b.title), ['C', 'A', 'B']);
       expect(uncategorized.map((b) => b.order), [0, 1, 2]);
+    });
+    test('deleting a category can take its bookmarks with it', () async {
+      final category = await state.addCategory('课程');
+      final news = await state.addCategory('新闻');
+      await add('https://a.test/1', category: category.id, title: 'A');
+      await add('https://b.test/2', category: category.id, title: 'B');
+      await add('https://c.test/3', category: news.id, title: 'C');
+
+      await state.removeCategory(category, deleteBookmarks: true);
+
+      expect(state.categories.map((c) => c.name), ['新闻']);
+      expect(state.bookmarks.map((b) => b.title), ['C'],
+          reason: '只有该分类下的书签被删除');
+      expect(state.bookmarksIn(news.id).map((b) => b.title), ['C']);
+    });
+
+    test('deleting a category also drops the whitelist rules its bookmarks owned',
+        () async {
+      final category = await state.addCategory('课程');
+      await state.addBookmark(
+        url: 'https://gone.test/lesson',
+        title: '旧课',
+        categoryId: category.id,
+        addToWhitelist: true,
+      );
+      // A second bookmark, in another category, grants the same site rule: that
+      // one has to survive the category delete.
+      await state.addBookmark(
+        url: 'https://gone.test/other',
+        title: '同站',
+        addToWhitelist: true,
+      );
+
+      await state.removeCategory(category, deleteBookmarks: true);
+
+      final patterns = {
+        for (final rule in state.policy.rulesOf(PolicyListKind.whitelist))
+          rule.pattern,
+      };
+      expect(patterns, {'https://gone.test', 'https://gone.test/other'});
+      // The deleted bookmark's own rule is gone; the site rule stays because the
+      // other bookmark still needs it — and it happens to cover /lesson too,
+      // which is exactly why the rule must not be dropped wholesale.
+      expect(state.decideUrl('https://gone.test/other').allowed, isTrue);
     });
   });
 
@@ -136,6 +181,51 @@ void main() {
       await state.moveBookmark(a, categoryId: news.id);
       expect(state.bookmarksIn(news.id).single.title, 'A');
       expect(state.bookmarksIn(uncategorizedId), isEmpty);
+    });
+
+    test('a whole selection moves at once, in the order it was listed', () async {
+      final lessons = await state.addCategory('课程');
+      final news = await state.addCategory('新闻');
+      await add('https://a.test/', category: lessons.id, title: 'A');
+      await add('https://b.test/', category: lessons.id, title: 'B');
+      await add('https://c.test/', category: lessons.id, title: 'C');
+      await add('https://n.test/', category: news.id, title: 'N');
+
+      // Deliberately not the display order: the caller's order is what wins.
+      final chosen = [
+        state.bookmarksIn(lessons.id)[2],
+        state.bookmarksIn(lessons.id)[0],
+      ];
+      await state.moveBookmarksToCategory(chosen, categoryId: news.id);
+
+      expect(state.bookmarksIn(lessons.id).map((b) => b.title), ['B']);
+      expect(state.bookmarksIn(lessons.id).map((b) => b.order), [0]);
+      expect(state.bookmarksIn(news.id).map((b) => b.title), ['N', 'C', 'A']);
+      expect(state.bookmarksIn(news.id).map((b) => b.order), [0, 1, 2]);
+    });
+
+    test('a selection can move back into 未分类', () async {
+      final lessons = await state.addCategory('课程');
+      await add('https://a.test/', category: lessons.id, title: 'A');
+      await add('https://b.test/', category: lessons.id, title: 'B');
+
+      await state.moveBookmarksToCategory(
+        state.bookmarksIn(lessons.id),
+        categoryId: uncategorizedId,
+      );
+
+      expect(state.bookmarksIn(lessons.id), isEmpty);
+      expect(state.bookmarksIn(uncategorizedId).map((b) => b.title), ['A', 'B']);
+    });
+
+    test('moving a selection skips bookmarks that no longer exist', () async {
+      final news = await state.addCategory('新闻');
+      final a = await add('https://a.test/', title: 'A');
+      final b = await add('https://b.test/', title: 'B');
+      await state.removeBookmark(b);
+
+      await state.moveBookmarksToCategory([a, b], categoryId: news.id);
+      expect(state.bookmarksIn(news.id).map((x) => x.title), ['A']);
     });
 
     test('order survives a reload from disk', () async {
