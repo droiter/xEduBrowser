@@ -27,11 +27,38 @@ enum BookmarkWhitelistScope {
       );
 }
 
+/// Where a local page takes its bookmark name from.
+///
+/// The single-bookmark dialog's 标题来源 dropdown and the directory-import
+/// dialog's 标题来源 dropdown both offer exactly these four choices, so the
+/// wording lives here once and the two flows cannot drift apart.
+enum LocalPageTitleSource {
+  /// The HTML file's own name, without its extension.
+  fileName('HTML 文件名'),
+
+  /// The folder the file sits in.
+  directoryName('所在目录名'),
+
+  /// The page's `<title>`.
+  internalTitle('网页内部标题'),
+
+  /// Nothing: the tile falls back to the address or the host.
+  blank('留空');
+
+  const LocalPageTitleSource(this.labelZh);
+
+  /// The dropdown label, identical in both dialogs.
+  final String labelZh;
+}
+
 /// One HTML page found by the scan.
 class ImportCandidate {
   final String filePath;
   final String url;
-  final String title;
+
+  /// Every name this page could be titled with: the import dialog's 标题来源
+  /// dropdown picks one of them, and the preview re-renders without rescanning.
+  final LocalPageTitles titles;
 
   /// The first-level subdirectory this page came from.
   final String subdirectory;
@@ -39,9 +66,74 @@ class ImportCandidate {
   const ImportCandidate({
     required this.filePath,
     required this.url,
-    required this.title,
+    required this.titles,
     required this.subdirectory,
   });
+
+  /// The name this page gets when the chosen 标题来源 is [source].
+  String titleFor(LocalPageTitleSource source) => titles.importTitle(source);
+
+  /// The default name — the page's `<title>`, or its file name — which is what
+  /// the importer produced before the choice existed.
+  String get title => titleFor(LocalPageTitleSource.internalTitle);
+}
+
+/// The key two bookmark names are compared by: trimmed and case-folded, so
+/// `Math` and `math` are the same name and a stray space never hides a clash.
+///
+/// An empty key means the bookmark has no name of its own — its tile falls back
+/// to the address or the host — and reserves nothing.
+String bookmarkTitleKey(String title) => title.trim().toLowerCase();
+
+/// A scanned page an import left out because its bookmark name was already
+/// taken — by a bookmark already in the library, or by an earlier page of the
+/// same batch.
+class ImportNameConflict {
+  const ImportNameConflict({required this.filePath, required this.title});
+
+  /// The page that was not imported.
+  final String filePath;
+
+  /// The name it would have taken, exactly as the chosen 标题来源 produced it.
+  final String title;
+
+  /// Just the file's name, for the report.
+  String get fileName {
+    final slash = filePath.lastIndexOf('/');
+    return slash < 0 ? filePath : filePath.substring(slash + 1);
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is ImportNameConflict &&
+      other.filePath == filePath &&
+      other.title == title;
+
+  @override
+  int get hashCode => Object.hash(filePath, title);
+}
+
+/// What an import would do with a plan, worked out before anything is written.
+///
+/// The import dialog previews this and `AppState.applyImportPlan` writes it, so
+/// the preview and the write can never disagree about what will be imported.
+class BookmarkImportDecision {
+  const BookmarkImportDecision({
+    this.additions = const [],
+    this.nameConflicts = const [],
+    this.alreadyBookmarked = 0,
+  });
+
+  /// The pages that become bookmarks, in scan order.
+  final List<ImportCandidate> additions;
+
+  /// Pages left out because another bookmark already carries their name.
+  final List<ImportNameConflict> nameConflicts;
+
+  /// How many pages were left out because their address is already bookmarked.
+  final int alreadyBookmarked;
+
+  int get nameConflictCount => nameConflicts.length;
 }
 
 /// The result of scanning a directory, before anything is written.
@@ -128,7 +220,7 @@ abstract final class BookmarkImporter {
         ImportCandidate(
           filePath: file.path,
           url: _urlFor(file.path, localServerBase, localServerRoot),
-          title: readHtmlTitle(file.path) ?? _titleFromFileName(file.path),
+          titles: LocalPageTitles.forPath(file.path),
           subdirectory: '',
         ),
     ];
@@ -207,7 +299,7 @@ abstract final class BookmarkImporter {
         ImportCandidate(
           filePath: page.path,
           url: _urlFor(page.path, localServerBase, localServerRoot),
-          title: readHtmlTitle(page.path) ?? _titleFromFileName(page.path),
+          titles: LocalPageTitles.forPath(page.path),
           subdirectory: subdirectory,
         ),
     ];
@@ -276,13 +368,6 @@ abstract final class BookmarkImporter {
     return text.trim();
   }
 
-  static String _titleFromFileName(String filePath) {
-    final name = _baseName(filePath);
-    final dot = name.lastIndexOf('.');
-    final stem = dot > 0 ? name.substring(0, dot) : name;
-    return stem.replaceAll(RegExp(r'[_-]+'), ' ').trim();
-  }
-
   static bool _isPage(String path) {
     final name = _baseName(path).toLowerCase();
     final dot = name.lastIndexOf('.');
@@ -303,7 +388,8 @@ abstract final class BookmarkImporter {
 ///
 /// The bookmark dialog offers them as a 标题来源 dropdown: the file's own name,
 /// the folder it sits in, the page's `<title>`, or nothing at all. Picking one
-/// fills the title field, which the user can still edit.
+/// fills the title field, which the user can still edit. The directory-import
+/// dialog offers the very same choices for the names it writes in bulk.
 class LocalPageTitles {
   const LocalPageTitles({
     required this.fileName,
@@ -322,6 +408,34 @@ class LocalPageTitles {
 
   bool get hasInternalTitle =>
       internalTitle != null && internalTitle!.trim().isNotEmpty;
+
+  /// The text [source] names this page with, or an empty string when the page
+  /// has no such name (`网页内部标题` on a file without a `<title>`, or
+  /// `留空`). This is what the single-bookmark form fills its field with.
+  String textFor(LocalPageTitleSource source) {
+    switch (source) {
+      case LocalPageTitleSource.fileName:
+        return fileName.trim();
+      case LocalPageTitleSource.directoryName:
+        return directoryName.trim();
+      case LocalPageTitleSource.internalTitle:
+        return (internalTitle ?? '').trim();
+      case LocalPageTitleSource.blank:
+        return '';
+    }
+  }
+
+  /// The name an **imported** page gets from [source].
+  ///
+  /// A batch import cannot stop at a file whose chosen source is empty, so an
+  /// empty candidate falls back to the file name — which is also exactly what
+  /// the importer produced before the choice existed. `留空` stays deliberately
+  /// empty: those tiles show the address or the host instead.
+  String importTitle(LocalPageTitleSource source) {
+    final text = textFor(source);
+    if (text.isNotEmpty) return text;
+    return source == LocalPageTitleSource.blank ? '' : fileName.trim();
+  }
 
   /// Candidates for a local page URL, or null when [url] is not a local file.
   static LocalPageTitles? forUrl(String url) {
@@ -359,12 +473,18 @@ String _pathParentName(String path) {
 /// What an import actually did.
 class BookmarkImportOutcome {
   final int added;
+
+  /// Pages left out because their address is already bookmarked.
   final int skipped;
+
   final int subdirectoryCount;
   final String rootPath;
   final String whitelistPattern;
   final bool truncated;
   final String targetCategoryId;
+
+  /// Pages left out because their name was already taken, in scan order.
+  final List<ImportNameConflict> nameConflicts;
 
   const BookmarkImportOutcome({
     required this.added,
@@ -374,12 +494,18 @@ class BookmarkImportOutcome {
     required this.whitelistPattern,
     required this.truncated,
     required this.targetCategoryId,
+    this.nameConflicts = const [],
   });
+
+  int get nameConflictCount => nameConflicts.length;
 
   /// One-line summary for a snackbar.
   String get summary {
     final buffer = StringBuffer('已导入 $added 个书签');
     if (skipped > 0) buffer.write('，跳过 $skipped 个（已存在）');
+    if (nameConflicts.isNotEmpty) {
+      buffer.write('，跳过 $nameConflictCount 个（重名）');
+    }
     if (truncated) buffer.write('，已达数量上限');
     return buffer.toString();
   }

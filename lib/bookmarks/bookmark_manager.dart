@@ -162,6 +162,14 @@ class BookmarkManagerCard extends StatelessWidget {
     final outcome = await showBookmarkImportDialog(context, directoryPath: path);
     if (outcome == null || !context.mounted) return;
 
+    // A name clash is the one import result a snackbar cannot explain: the user
+    // has to see *which* pages were left out, so it gets a dialog — which also
+    // carries the summary and the whitelist line the snackbar would have shown.
+    if (outcome.nameConflicts.isNotEmpty) {
+      await showImportNameConflictDialog(context, outcome: outcome);
+      return;
+    }
+
     final buffer = StringBuffer(outcome.summary);
     if (outcome.whitelistPattern.isNotEmpty) {
       buffer.write('；白名单：${outcome.whitelistPattern}');

@@ -843,11 +843,14 @@ class AppState extends ChangeNotifier {
   ///
   /// See [BookmarkImporter.scan] for the traversal rules and
   /// [BookmarkWhitelistScope] for what to grant. Pages already bookmarked are
-  /// skipped rather than duplicated.
+  /// skipped rather than duplicated. [titleSource] picks the bookmark name the
+  /// way the add-bookmark dialog's 标题来源 dropdown does; a page whose chosen
+  /// source is empty falls back to its file name.
   Future<BookmarkImportOutcome> importBookmarksFromDirectory({
     required String directoryPath,
     required String categoryId,
     BookmarkWhitelistScope whitelistScope = BookmarkWhitelistScope.directory,
+    LocalPageTitleSource titleSource = LocalPageTitleSource.internalTitle,
     int maxFiles = BookmarkImporter.defaultMaxFiles,
   }) async {
     final plan = await BookmarkImporter.scan(
@@ -856,7 +859,63 @@ class AppState extends ChangeNotifier {
       localServerRoot: effectiveLocalRoot,
       maxFiles: maxFiles,
     );
-    return applyImportPlan(plan, categoryId: categoryId, whitelistScope: whitelistScope);
+    return applyImportPlan(
+      plan,
+      categoryId: categoryId,
+      whitelistScope: whitelistScope,
+      titleSource: titleSource,
+    );
+  }
+
+  /// What [applyImportPlan] would do with [plan], without writing anything.
+  ///
+  /// The import dialog shows this (so the preview can mark the pages that will
+  /// be left out) and [applyImportPlan] reuses it, which keeps the two in step.
+  ///
+  /// A page is left out when its address is already bookmarked, or when the
+  /// name the chosen [titleSource] gives it is **already taken** — by a bookmark
+  /// in the library, or by an earlier page of the same batch, so a single import
+  /// never produces two same-named tiles. Names are compared through
+  /// [bookmarkTitleKey]; a `留空` name reserves nothing and never clashes.
+  BookmarkImportDecision previewImport(
+    BookmarkImportPlan plan, {
+    LocalPageTitleSource titleSource = LocalPageTitleSource.internalTitle,
+  }) {
+    final existingUrls = {for (final bookmark in _library.bookmarks) bookmark.url};
+    final takenNames = <String>{
+      for (final bookmark in _library.bookmarks)
+        if (bookmarkTitleKey(bookmark.title).isNotEmpty)
+          bookmarkTitleKey(bookmark.title),
+    };
+
+    final additions = <ImportCandidate>[];
+    final conflicts = <ImportNameConflict>[];
+    var alreadyBookmarked = 0;
+
+    for (final candidate in plan.candidates) {
+      final url = policyUrl(candidate.url);
+      if (existingUrls.contains(url)) {
+        alreadyBookmarked++;
+        continue;
+      }
+      final title = candidate.titleFor(titleSource);
+      final key = bookmarkTitleKey(title);
+      if (key.isNotEmpty && takenNames.contains(key)) {
+        conflicts.add(
+          ImportNameConflict(filePath: candidate.filePath, title: title),
+        );
+        continue;
+      }
+      existingUrls.add(url);
+      if (key.isNotEmpty) takenNames.add(key);
+      additions.add(candidate);
+    }
+
+    return BookmarkImportDecision(
+      additions: additions,
+      nameConflicts: conflicts,
+      alreadyBookmarked: alreadyBookmarked,
+    );
   }
 
   /// Writes an already-scanned plan. Split out so the UI can show a preview and
@@ -865,23 +924,17 @@ class AppState extends ChangeNotifier {
     BookmarkImportPlan plan, {
     required String categoryId,
     BookmarkWhitelistScope whitelistScope = BookmarkWhitelistScope.directory,
+    LocalPageTitleSource titleSource = LocalPageTitleSource.internalTitle,
   }) async {
-    final existingUrls = {for (final bookmark in _library.bookmarks) bookmark.url};
+    final decision = previewImport(plan, titleSource: titleSource);
     var order = _nextOrderIn(categoryId);
     final added = <Bookmark>[];
-    var skipped = 0;
 
-    for (final candidate in plan.candidates) {
-      final url = policyUrl(candidate.url);
-      if (existingUrls.contains(url)) {
-        skipped++;
-        continue;
-      }
-      existingUrls.add(url);
+    for (final candidate in decision.additions) {
       added.add(Bookmark(
         id: 'b${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}${added.length}',
-        url: url,
-        title: candidate.title,
+        url: policyUrl(candidate.url),
+        title: candidate.titleFor(titleSource),
         createdAt: DateTime.now(),
         categoryId: categoryId,
         order: order++,
@@ -889,9 +942,10 @@ class AppState extends ChangeNotifier {
     }
 
     var whitelistPattern = '';
-    // Nothing was found, so there is nothing to allow: granting a rule here
-    // would widen access for a directory the user got no bookmarks from.
-    final shouldGrant = plan.candidates.isNotEmpty;
+    // Nothing is added, so there is nothing to allow: granting a rule here
+    // would widen access for a directory the user got no new bookmarks from.
+    // (Pages skipped for a name clash count as "nothing new" too.)
+    final shouldGrant = added.isNotEmpty;
     switch (shouldGrant ? whitelistScope : BookmarkWhitelistScope.none) {
       case BookmarkWhitelistScope.none:
         break;
@@ -903,9 +957,9 @@ class AppState extends ChangeNotifier {
           note: '本地目录导入：${_lastSegment(plan.rootPath)}',
         ));
       case BookmarkWhitelistScope.perFile:
-        for (final candidate in added) {
+        for (final bookmark in added) {
           await addRule(PolicyRule(
-            pattern: BookmarkWhitelist.urlPattern(policyUrl(candidate.url)),
+            pattern: BookmarkWhitelist.urlPattern(bookmark.url),
             kind: PolicyListKind.whitelist,
             note: '本地导入',
           ));
@@ -924,12 +978,13 @@ class AppState extends ChangeNotifier {
 
     return BookmarkImportOutcome(
       added: added.length,
-      skipped: skipped,
+      skipped: decision.alreadyBookmarked,
       subdirectoryCount: plan.subdirectories.length,
       rootPath: plan.rootPath,
       whitelistPattern: whitelistPattern,
       truncated: plan.truncated,
       targetCategoryId: categoryId,
+      nameConflicts: decision.nameConflicts,
     );
   }
 

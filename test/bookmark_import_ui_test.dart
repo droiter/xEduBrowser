@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tablet_browser/bookmarks/bookmark.dart';
+import 'package:tablet_browser/bookmarks/bookmark_import.dart';
 import 'package:tablet_browser/bookmarks/category_dialogs.dart';
 import 'package:tablet_browser/policy/policy_config.dart';
 import 'package:tablet_browser/state/app_scope.dart';
@@ -139,6 +140,100 @@ void main() {
 
     expect(state.bookmarks, isEmpty);
     expect(state.policy.rulesOf(PolicyListKind.whitelist), isEmpty);
+  });
+
+  testWidgets('the dialog offers the same 标题来源 as the add-bookmark form',
+      (tester) async {
+    await pumpHost(tester);
+    await tester.tap(find.text('打开导入'));
+    await tester.pump();
+    await letScanFinish(tester);
+
+    // The four sources of the add-bookmark dialog, and the preview starts on
+    // the page's own <title>.
+    expect(find.byKey(importTitleSourceKey), findsOneWidget);
+    expect(find.textContaining('第一课 拼音'), findsWidgets);
+
+    await tester.tap(find.byKey(importTitleSourceKey));
+    await tester.pumpAndSettle();
+    expect(find.text('HTML 文件名'), findsWidgets);
+    expect(find.text('所在目录名'), findsWidgets);
+    expect(find.text('网页内部标题'), findsWidgets);
+    expect(find.text('留空'), findsWidgets);
+
+    // Picking the folder name renames the preview without a rescan...
+    await tester.tap(find.text('所在目录名').last);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('第一课 拼音'), findsNothing);
+    // ...and it exposes the clash it creates: two pages now want the name 语文.
+    // The clash is flagged *before* importing, not only reported afterwards.
+    expect(find.text('重名'), findsOneWidget);
+    expect(find.textContaining('其中 1 个与已有书签重名'), findsOneWidget);
+
+    // ...and that is the name the import writes — the clashing page is left out.
+    await tester.tap(find.text('开始导入'));
+    await letScanFinish(tester);
+
+    expect(state.bookmarks.length, 2);
+    expect(
+      state.bookmarksIn(uncategorizedId).map((b) => b.title).toSet(),
+      {'语文', '数学'},
+    );
+  });
+
+  testWidgets('the 重名 report lists the pages that were left out',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      AppScope(
+        state: state,
+        child: MaterialApp(
+          theme: AppTheme.light,
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => Center(
+                child: ElevatedButton(
+                  onPressed: () => showImportNameConflictDialog(
+                    context,
+                    outcome: const BookmarkImportOutcome(
+                      added: 2,
+                      skipped: 0,
+                      subdirectoryCount: 2,
+                      rootPath: '/sdcard/course',
+                      whitelistPattern: 'file:///sdcard/course/',
+                      truncated: false,
+                      targetCategoryId: uncategorizedId,
+                      nameConflicts: [
+                        ImportNameConflict(
+                          filePath: '/sdcard/course/语文/第二课.html',
+                          title: '语文',
+                        ),
+                      ],
+                    ),
+                  ),
+                  child: const Text('打开报告'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('打开报告'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(importNameConflictDialogKey), findsOneWidget);
+    expect(find.text('1 个书签重名，未导入'), findsOneWidget);
+    // Which bookmark was left out: the name, and the file it came from.
+    expect(find.text('语文'), findsWidgets);
+    expect(find.text('第二课.html'), findsOneWidget);
+    // The summary and the rule that was granted are on the same screen.
+    expect(find.text('已导入 2 个书签，跳过 1 个（重名）'), findsOneWidget);
+    expect(find.text('白名单：file:///sdcard/course/'), findsOneWidget);
   });
 
   testWidgets('a directory with nothing to import says so', (tester) async {

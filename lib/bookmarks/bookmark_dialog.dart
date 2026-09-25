@@ -90,21 +90,6 @@ Future<bool?> confirmBookmarkDelete(
   );
 }
 
-/// Where the 标题来源 dropdown takes a local page's title from.
-enum _TitleSource {
-  /// The HTML file's own name, without its extension.
-  fileName,
-
-  /// The folder the file sits in.
-  directoryName,
-
-  /// The page's `<title>` (disabled when the file has none).
-  internalTitle,
-
-  /// Nothing: the field is cleared and the tile falls back to the host.
-  blank,
-}
-
 /// The form for adding or editing a bookmark.
 ///
 /// A StatefulWidget rather than a `StatefulBuilder`, so the text controllers
@@ -168,7 +153,7 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
 
   /// Which candidate the title field currently holds, or null once it is the
   /// user's own text.
-  _TitleSource? _titleSource;
+  LocalPageTitleSource? _titleSource;
 
   @override
   void initState() {
@@ -180,9 +165,9 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
     // An existing (or already typed) title is never overwritten.
     if (widget.initialTitle.trim().isNotEmpty) return;
     for (final source in const [
-      _TitleSource.internalTitle,
-      _TitleSource.fileName,
-      _TitleSource.directoryName,
+      LocalPageTitleSource.internalTitle,
+      LocalPageTitleSource.fileName,
+      LocalPageTitleSource.directoryName,
     ]) {
       final candidate = _textFor(source);
       if (candidate.isNotEmpty) {
@@ -194,23 +179,11 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
   }
 
   /// The text a source would put in the title field.
-  String _textFor(_TitleSource source) {
-    final titles = _titles;
-    if (titles == null) return '';
-    switch (source) {
-      case _TitleSource.fileName:
-        return titles.fileName.trim();
-      case _TitleSource.directoryName:
-        return titles.directoryName.trim();
-      case _TitleSource.internalTitle:
-        return (titles.internalTitle ?? '').trim();
-      case _TitleSource.blank:
-        return '';
-    }
-  }
+  String _textFor(LocalPageTitleSource source) =>
+      _titles?.textFor(source) ?? '';
 
   /// Fills the title field from the chosen source, leaving it editable.
-  void _applyTitleSource(_TitleSource? source) {
+  void _applyTitleSource(LocalPageTitleSource? source) {
     if (source == null) return;
     final text = _textFor(source);
     setState(() {
@@ -229,10 +202,13 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
 
   /// The 标题来源 dropdown: picking an entry fills the title field above the
   /// user's cursor, and the field stays editable.
+  ///
+  /// The same four sources are offered when importing a whole directory — see
+  /// [LocalPageTitleSource].
   Widget _titleSourceField(ThemeData theme) {
     final titles = _titles!;
     final internal = titles.internalTitle?.trim() ?? '';
-    return DropdownButtonFormField<_TitleSource>(
+    return DropdownButtonFormField<LocalPageTitleSource>(
       key: bookmarkTitleSourceKey,
       initialValue: _titleSource,
       isExpanded: true,
@@ -245,26 +221,28 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
       hint: const Text('选择标题来源'),
       items: [
         DropdownMenuItem(
-          value: _TitleSource.fileName,
+          value: LocalPageTitleSource.fileName,
           child: Text(
-            'HTML 文件名：${titles.fileName}',
+            '${LocalPageTitleSource.fileName.labelZh}：${titles.fileName}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
         ),
         DropdownMenuItem(
-          value: _TitleSource.directoryName,
+          value: LocalPageTitleSource.directoryName,
           child: Text(
-            '所在目录名：${titles.directoryName}',
+            '${LocalPageTitleSource.directoryName.labelZh}：${titles.directoryName}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
         ),
         DropdownMenuItem(
-          value: _TitleSource.internalTitle,
+          value: LocalPageTitleSource.internalTitle,
           enabled: titles.hasInternalTitle,
           child: Text(
-            titles.hasInternalTitle ? '网页内部标题：$internal' : '网页内部标题（这个文件没有）',
+            titles.hasInternalTitle
+                ? '${LocalPageTitleSource.internalTitle.labelZh}：$internal'
+                : '${LocalPageTitleSource.internalTitle.labelZh}（这个文件没有）',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: titles.hasInternalTitle
@@ -272,7 +250,10 @@ class _BookmarkFormDialogState extends State<_BookmarkFormDialog> {
                 : TextStyle(color: theme.disabledColor),
           ),
         ),
-        const DropdownMenuItem(value: _TitleSource.blank, child: Text('留空')),
+        DropdownMenuItem(
+          value: LocalPageTitleSource.blank,
+          child: Text(LocalPageTitleSource.blank.labelZh),
+        ),
       ],
       onChanged: _applyTitleSource,
     );

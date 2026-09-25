@@ -165,6 +165,41 @@ void main() {
     });
   });
 
+  group('title source for a batch', () {
+    test('every source names a scanned page the way the dialog would', () async {
+      final plan = await BookmarkImporter.scan(root.path);
+
+      String titleOf(String file, LocalPageTitleSource source) => plan.candidates
+          .firstWhere((candidate) => candidate.filePath.endsWith(file))
+          .titleFor(source);
+
+      expect(titleOf('lesson1.html', LocalPageTitleSource.internalTitle), '第一课 加法');
+      expect(titleOf('lesson1.html', LocalPageTitleSource.fileName), 'lesson1');
+      expect(titleOf('lesson1.html', LocalPageTitleSource.directoryName), 'math');
+      expect(titleOf('lesson1.html', LocalPageTitleSource.blank), '');
+      // A nested page is named after the folder it actually sits in.
+      expect(titleOf('lesson2.html', LocalPageTitleSource.directoryName), 'deep');
+      // No <title> in the file: the default source falls back to the file name,
+      // exactly as the importer behaved before the choice existed.
+      expect(titleOf('lesson3.htm', LocalPageTitleSource.internalTitle), 'lesson3');
+    });
+
+    test('an empty candidate falls back to the file name, except 留空', () {
+      const titles = LocalPageTitles(
+        fileName: '页面',
+        directoryName: '',
+        internalTitle: null,
+      );
+
+      expect(titles.textFor(LocalPageTitleSource.internalTitle), '');
+      expect(titles.importTitle(LocalPageTitleSource.internalTitle), '页面');
+      expect(titles.importTitle(LocalPageTitleSource.directoryName), '页面');
+      expect(titles.importTitle(LocalPageTitleSource.fileName), '页面');
+      // 留空 is a deliberate choice, never a fallback.
+      expect(titles.importTitle(LocalPageTitleSource.blank), '');
+    });
+  });
+
   group('title candidates for one local page', () {
     test('offers the file name, the folder name and the <title>', () {
       writeHtml('${root.path}/课件/第一课.html', title: '拼音第一课');
@@ -312,6 +347,146 @@ void main() {
       expect(state.policy.rulesOf(PolicyListKind.whitelist), isEmpty);
     });
 
+    test('a page whose name is already taken is not imported, and is reported',
+        () async {
+      await state.addBookmark(
+        url: 'https://school.test/lessons',
+        title: '第一课 加法',
+        addToWhitelist: false,
+      );
+
+      final outcome = await state.importBookmarksFromDirectory(
+        directoryPath: root.path,
+        categoryId: uncategorizedId,
+        whitelistScope: BookmarkWhitelistScope.none,
+      );
+
+      expect(outcome.added, 3);
+      expect(outcome.skipped, 0);
+      // The clash is named, not just counted: the report has to say *which*
+      // bookmark was left out.
+      expect(outcome.nameConflicts, hasLength(1));
+      final conflict = outcome.nameConflicts.single;
+      expect(conflict.title, '第一课 加法');
+      expect(conflict.fileName, 'lesson1.html');
+      // The other pages still came in, and the existing bookmark is untouched.
+      expect(
+        state.bookmarksIn(uncategorizedId).map((b) => b.title).toSet(),
+        {'第一课 加法', '顶层页面', '第二课 减法', 'lesson3'},
+      );
+      expect(outcome.summary, '已导入 3 个书签，跳过 1 个（重名）');
+    });
+
+    test('two pages of one batch with the same name: only the first is imported',
+        () async {
+      // lesson1.html is titled 第一课 加法; this newcomer wants the same name.
+      writeHtml('${root.path}/science/lesson3b.htm', title: '第一课 加法');
+
+      final outcome = await state.importBookmarksFromDirectory(
+        directoryPath: root.path,
+        categoryId: uncategorizedId,
+        whitelistScope: BookmarkWhitelistScope.none,
+      );
+
+      expect(outcome.added, 4);
+      expect(outcome.nameConflicts, hasLength(1));
+      expect(outcome.nameConflicts.single.fileName, 'lesson3b.htm');
+      // math is walked before science, so lesson1.html is the one that stayed.
+      expect(
+        state.bookmarksIn(uncategorizedId).map((b) => b.title),
+        ['顶层页面', '第一课 加法', '第二课 减法', 'lesson3'],
+      );
+    });
+
+    test('names are compared trimmed and case-folded', () async {
+      await state.addBookmark(
+        url: 'https://school.test/math',
+        title: '  MATH ',
+        addToWhitelist: false,
+      );
+
+      // 所在目录名 gives `math` for the math folder: the same name.
+      final outcome = await state.importBookmarksFromDirectory(
+        directoryPath: root.path,
+        categoryId: uncategorizedId,
+        whitelistScope: BookmarkWhitelistScope.none,
+        titleSource: LocalPageTitleSource.directoryName,
+      );
+
+      expect(
+        outcome.nameConflicts.map((conflict) => conflict.title),
+        ['math'],
+      );
+    });
+
+    test('留空 names never clash', () async {
+      await state.addBookmark(
+        url: 'https://school.test/lessons',
+        title: '第一课 加法',
+        addToWhitelist: false,
+      );
+
+      final outcome = await state.importBookmarksFromDirectory(
+        directoryPath: root.path,
+        categoryId: uncategorizedId,
+        whitelistScope: BookmarkWhitelistScope.none,
+        titleSource: LocalPageTitleSource.blank,
+      );
+
+      expect(outcome.added, 4);
+      expect(outcome.nameConflicts, isEmpty);
+      expect(outcome.summary, '已导入 4 个书签');
+    });
+
+    test('a preview names the same additions and clashes the write performs',
+        () async {
+      await state.addBookmark(
+        url: 'https://school.test/lessons',
+        title: '第一课 加法',
+        addToWhitelist: false,
+      );
+      final plan = await BookmarkImporter.scan(root.path);
+
+      final decision = state.previewImport(plan);
+      expect(decision.additions, hasLength(3));
+      expect(decision.nameConflicts, hasLength(1));
+      expect(decision.alreadyBookmarked, 0);
+
+      final outcome = await state.applyImportPlan(
+        plan,
+        categoryId: uncategorizedId,
+        whitelistScope: BookmarkWhitelistScope.none,
+      );
+      expect(outcome.added, decision.additions.length);
+      expect(outcome.nameConflicts, decision.nameConflicts);
+    });
+
+    test('when every page clashes, no whitelist rule is granted', () async {
+      // Import once with 留空, then again with 所在目录名 after reserving the
+      // folder names: nothing can be added, so nothing should be allowed.
+      final plan = await BookmarkImporter.scan(root.path);
+      final names = [
+        for (final candidate in plan.candidates)
+          candidate.titleFor(LocalPageTitleSource.fileName),
+      ];
+      for (final name in names) {
+        await state.addBookmark(
+          url: 'https://school.test/$name',
+          title: name,
+          addToWhitelist: false,
+        );
+      }
+
+      final outcome = await state.importBookmarksFromDirectory(
+        directoryPath: root.path,
+        categoryId: uncategorizedId,
+        titleSource: LocalPageTitleSource.fileName,
+      );
+      expect(outcome.added, 0);
+      expect(outcome.nameConflicts, hasLength(4));
+      expect(state.policy.rulesOf(PolicyListKind.whitelist), isEmpty);
+    });
+
     test('the outcome summary reads sensibly', () async {
       final outcome = await state.importBookmarksFromDirectory(
         directoryPath: root.path,
@@ -340,6 +515,42 @@ void main() {
       final second = state.bookmarksIn(category.id)[1];
       await state.reorderBookmark(second, 0);
       expect(state.bookmarksIn(category.id).first.id, second.id);
+    });
+
+    test('the chosen 标题来源 names every imported bookmark', () async {
+      final category = await state.addCategory('课程');
+      final outcome = await state.importBookmarksFromDirectory(
+        directoryPath: root.path,
+        categoryId: category.id,
+        whitelistScope: BookmarkWhitelistScope.none,
+        titleSource: LocalPageTitleSource.directoryName,
+      );
+
+      expect(outcome.added, 4);
+      final imported = state.bookmarksIn(category.id);
+      expect(imported.map((b) => b.title), [
+        root.path.split('/').last, // top.html sits in the chosen directory
+        'math', // lesson1.html
+        'deep', // lesson2.html, nested one level deeper
+        'science', // lesson3.htm, which has no <title>
+      ]);
+    });
+
+    test('留空 stores no title, and the tile falls back to the address',
+        () async {
+      final category = await state.addCategory('课程');
+      await state.importBookmarksFromDirectory(
+        directoryPath: root.path,
+        categoryId: category.id,
+        whitelistScope: BookmarkWhitelistScope.none,
+        titleSource: LocalPageTitleSource.blank,
+      );
+
+      final imported = state.bookmarksIn(category.id);
+      expect(imported, hasLength(4));
+      expect(imported.every((b) => b.title.isEmpty), isTrue);
+      // What the tile shows instead: the last path segment of the address.
+      expect(imported.first.displayTitle, 'top.html');
     });
 
     test('a plan can be applied directly, which is what the preview dialog does',

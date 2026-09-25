@@ -24,6 +24,13 @@ import 'bookmark_import.dart';
 /// opens [showCategoryNameDialog] instead.
 const String _newCategoryValue = '\u0000new-category';
 
+/// Test hook for the import dialog's 标题来源 dropdown.
+const Key importTitleSourceKey = ValueKey<String>('import-title-source');
+
+/// Test hook for the post-import 重名 report.
+const Key importNameConflictDialogKey =
+    ValueKey<String>('import-name-conflict-dialog');
+
 /// Prompts for a category name. Returns the trimmed name, or null on cancel.
 Future<String?> showCategoryNameDialog(
   BuildContext context, {
@@ -66,6 +73,20 @@ Future<BookmarkImportOutcome?> showBookmarkImportDialog(
     showDialog<BookmarkImportOutcome>(
       context: context,
       builder: (context) => _BookmarkImportDialog(directoryPath: directoryPath),
+    );
+
+/// Tells the user which pages an import left out because their bookmark name
+/// was already taken — the one part of an import a snackbar cannot explain.
+///
+/// Carries the whole outcome, so the summary and the whitelist rule that were
+/// granted are on the same screen as the list.
+Future<void> showImportNameConflictDialog(
+  BuildContext context, {
+  required BookmarkImportOutcome outcome,
+}) =>
+    showDialog<void>(
+      context: context,
+      builder: (context) => _ImportNameConflictDialog(outcome: outcome),
     );
 
 /// The category manager: rename/delete existing categories, create new ones.
@@ -307,7 +328,8 @@ class _CategoryDeleteDialog extends StatelessWidget {
 /// How many scanned pages the preview lists before it collapses into "还有 K 个…".
 const int _previewLimit = 10;
 
-/// The directory-import dialog: scan, preview, choose target, import.
+/// The directory-import dialog: scan, preview, choose the 标题来源 for the whole
+/// batch, choose the target category, import.
 class _BookmarkImportDialog extends StatefulWidget {
   const _BookmarkImportDialog({required this.directoryPath});
 
@@ -328,6 +350,11 @@ class _BookmarkImportDialogState extends State<_BookmarkImportDialog> {
   String _categoryId = uncategorizedId;
 
   BookmarkWhitelistScope _scope = BookmarkWhitelistScope.directory;
+
+  /// Where the imported bookmarks take their names from. The same four choices
+  /// as the add-bookmark dialog, defaulting to the page's own `<title>` with
+  /// the file name as the fallback — what the importer always did.
+  LocalPageTitleSource _titleSource = LocalPageTitleSource.internalTitle;
 
   @override
   void initState() {
@@ -367,6 +394,7 @@ class _BookmarkImportDialogState extends State<_BookmarkImportDialog> {
         plan,
         categoryId: _categoryId,
         whitelistScope: _scope,
+        titleSource: _titleSource,
       );
       if (!mounted) return;
       Navigator.of(context).pop(outcome);
@@ -405,6 +433,11 @@ class _BookmarkImportDialogState extends State<_BookmarkImportDialog> {
   Widget build(BuildContext context) {
     final state = AppScope.read(context);
     final plan = _plan;
+    // What the import would write, computed with the same rule the write uses,
+    // so the preview can mark the pages a name clash will leave out.
+    final decision = plan == null || plan.isEmpty
+        ? null
+        : state.previewImport(plan, titleSource: _titleSource);
     return AlertDialog(
       title: const Text('导入本地目录'),
       content: SizedBox(
@@ -430,8 +463,11 @@ class _BookmarkImportDialogState extends State<_BookmarkImportDialog> {
                 const SizedBox(height: 14),
                 if (plan.isEmpty)
                   _emptyState(context, plan)
-                else
-                  _preview(context, plan),
+                else ...[
+                  _titleSourceField(context, plan),
+                  const SizedBox(height: 18),
+                  _preview(context, plan, decision!),
+                ],
                 const SizedBox(height: 6),
                 if (plan.truncated)
                   _message(
@@ -537,6 +573,64 @@ class _BookmarkImportDialogState extends State<_BookmarkImportDialog> {
     );
   }
 
+  /// The 标题来源 dropdown: the same four sources as the add-bookmark dialog,
+  /// applied to every page of the batch. Changing it re-renders the preview
+  /// from the names the scan already collected, so no rescan is needed.
+  Widget _titleSourceField(BuildContext context, BookmarkImportPlan plan) {
+    final theme = Theme.of(context);
+    final missing = plan.candidates
+        .where((candidate) => !candidate.titles.hasInternalTitle)
+        .length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DropdownButtonFormField<LocalPageTitleSource>(
+          key: importTitleSourceKey,
+          initialValue: _titleSource,
+          isExpanded: true,
+          decoration: const InputDecoration(
+            labelText: '标题来源',
+            helperText: '导入时按这个来源生成书签名，下面的预览会跟着变',
+            helperMaxLines: 2,
+            border: OutlineInputBorder(),
+          ),
+          items: [
+            for (final source in LocalPageTitleSource.values)
+              DropdownMenuItem<LocalPageTitleSource>(
+                value: source,
+                child: Text(source.labelZh),
+              ),
+          ],
+          onChanged: (value) {
+            if (value == null) return;
+            setState(() => _titleSource = value);
+          },
+        ),
+        const SizedBox(height: 6),
+        Text(
+          _titleSourceHint(missing),
+          style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+        ),
+      ],
+    );
+  }
+
+  /// One line saying what the chosen source will produce for this batch.
+  String _titleSourceHint(int missingInternalTitles) {
+    switch (_titleSource) {
+      case LocalPageTitleSource.internalTitle:
+        return missingInternalTitles == 0
+            ? '这些页面都有网页内部标题，全部按它命名。'
+            : '其中 $missingInternalTitles 个页面没有内部标题，这些会用文件名。';
+      case LocalPageTitleSource.fileName:
+        return '按 HTML 文件名（去掉扩展名）命名。';
+      case LocalPageTitleSource.directoryName:
+        return '按每个页面所在目录名命名；个别页面取不到目录名时会用文件名。';
+      case LocalPageTitleSource.blank:
+        return '书签名留空：方块下方显示网址或域名，之后可以逐个改标题。';
+    }
+  }
+
   Widget _emptyState(BuildContext context, BookmarkImportPlan plan) {
     final theme = Theme.of(context);
     return Column(
@@ -565,36 +659,42 @@ class _BookmarkImportDialogState extends State<_BookmarkImportDialog> {
     );
   }
 
-  Widget _preview(BuildContext context, BookmarkImportPlan plan) {
+  Widget _preview(
+    BuildContext context,
+    BookmarkImportPlan plan,
+    BookmarkImportDecision decision,
+  ) {
     final theme = Theme.of(context);
+    final conflicts = {
+      for (final conflict in decision.nameConflicts) conflict.filePath,
+    };
     final shown = plan.candidates.take(_previewLimit).toList();
     final rest = plan.candidates.length - shown.length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('预览', style: theme.textTheme.titleSmall),
+        const SizedBox(height: 2),
+        Text(
+          '标题按上面选定的「标题来源」生成。',
+          style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+        ),
+        if (decision.nameConflictCount > 0) ...[
+          const SizedBox(height: 4),
+          _message(
+            context,
+            icon: Icons.content_copy_outlined,
+            color: theme.colorScheme.error,
+            text: '其中 ${decision.nameConflictCount} 个与已有书签重名，'
+                '不会导入（预览里已标出）。改「标题来源」或改这些页面的标题后可以再试。',
+          ),
+        ],
         const SizedBox(height: 6),
         for (final candidate in shown)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 3),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Text(
-                    candidate.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  candidate.subdirectory.isEmpty ? '所选目录' : candidate.subdirectory,
-                  style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
-                ),
-              ],
-            ),
+          _previewRow(
+            theme,
+            candidate,
+            conflict: conflicts.contains(candidate.filePath),
           ),
         if (rest > 0)
           Padding(
@@ -605,6 +705,53 @@ class _BookmarkImportDialogState extends State<_BookmarkImportDialog> {
             ),
           ),
       ],
+    );
+  }
+
+  /// One preview line: the name the page will actually be bookmarked with, the
+  /// subdirectory it came from, and a 重名 tag when a name clash will leave it
+  /// out. A `留空` name is shown as a grey placeholder because the tile would
+  /// fall back to the address.
+  Widget _previewRow(
+    ThemeData theme,
+    ImportCandidate candidate, {
+    required bool conflict,
+  }) {
+    final title = candidate.titleFor(_titleSource);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Text(
+              title.isEmpty ? '（留空，显示网址或域名）' : title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: title.isEmpty
+                  ? theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.hintColor,
+                      fontStyle: FontStyle.italic,
+                    )
+                  : theme.textTheme.bodyMedium,
+            ),
+          ),
+          if (conflict) ...[
+            const SizedBox(width: 8),
+            Text(
+              '重名',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.error,
+              ),
+            ),
+          ],
+          const SizedBox(width: 12),
+          Text(
+            candidate.subdirectory.isEmpty ? '所选目录' : candidate.subdirectory,
+            style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
+          ),
+        ],
+      ),
     );
   }
 
@@ -739,6 +886,127 @@ class _BookmarkImportDialogState extends State<_BookmarkImportDialog> {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ------------------------------------------------------- import report dialog
+
+/// How many conflicting pages the report lists before it collapses.
+const int _conflictLimit = 20;
+
+/// The post-import 重名 report: what was imported, and exactly which pages were
+/// left out because another bookmark already carried their name.
+class _ImportNameConflictDialog extends StatelessWidget {
+  const _ImportNameConflictDialog({required this.outcome});
+
+  final BookmarkImportOutcome outcome;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final conflicts = outcome.nameConflicts;
+    final shown = conflicts.take(_conflictLimit).toList();
+    final rest = conflicts.length - shown.length;
+
+    return AlertDialog(
+      key: importNameConflictDialogKey,
+      title: Text('${conflicts.length} 个书签重名，未导入'),
+      content: SizedBox(
+        width: 520,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(outcome.summary, style: theme.textTheme.bodyMedium),
+              const SizedBox(height: 10),
+              Text(
+                '下面这些页面没有导入：它们要用的书签名和已有书签'
+                '（或本次先导入的书签）重复了。想让它们进首页，'
+                '可以单独添加，或改一个标题后重新导入。',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.hintColor,
+                  height: 1.45,
+                ),
+              ),
+              const SizedBox(height: 10),
+              for (final conflict in shown) _row(context, theme, conflict),
+              if (rest > 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    '还有 $rest 个…',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.hintColor,
+                    ),
+                  ),
+                ),
+              if (outcome.whitelistPattern.isNotEmpty) ...[
+                const Divider(height: 26),
+                Text(
+                  '白名单：${outcome.whitelistPattern}',
+                  style: monoStyle(context, fontSize: 12),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('知道了'),
+        ),
+      ],
+    );
+  }
+
+  /// One skipped page: the name it wanted, and the file it came from.
+  Widget _row(
+    BuildContext context,
+    ThemeData theme,
+    ImportNameConflict conflict,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Icon(
+              Icons.content_copy_outlined,
+              size: 15,
+              color: theme.colorScheme.error,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  conflict.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium,
+                ),
+                Text(
+                  conflict.fileName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: monoStyle(
+                    context,
+                    fontSize: 11,
+                    color: theme.hintColor,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
