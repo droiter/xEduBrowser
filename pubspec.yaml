@@ -1,7 +1,7 @@
 name: tablet_browser
 description: "平板浏览器：支持在线/本地静态与动态网页，内置白名单/黑名单网址过滤。"
 publish_to: 'none'
-version: 1.0.11+12
+version: 1.0.12+13
 
 environment:
   sdk: ^3.13.4
