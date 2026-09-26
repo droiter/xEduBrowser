@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../bookmarks/bookmark_manager.dart';
+import '../browser/browser_bridge.dart';
 import '../files/local_files_screen.dart';
 import '../parental/parental_challenge.dart';
 import '../parental/parental_gate.dart';
@@ -26,6 +29,9 @@ const Key newParentalPasswordConfirmFieldKey =
     ValueKey<String>('parental-new-password-confirm');
 const Key arithmeticOptionsKey = ValueKey<String>('parental-arithmetic-options');
 
+/// 测试钩子：「关于」卡片里显示版本号的那一行。
+const Key aboutVersionKey = ValueKey<String>('about-version');
+
 /// WebView 与应用设置：引擎开关、文字缩放、起始页、本地服务器、
 /// 家长验证、书签默认行为与危险操作。
 ///
@@ -46,6 +52,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   /// 拖动中的题目数量（同上，松手时才写入设置）。
   int? _draggingQuestionCount;
+
+  /// 本机安装的版本，供「关于」卡片显示。null 表示还没读到（或读不到）。
+  AppVersion? _appVersion;
+  bool _appVersionRead = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // 版本号只有原生知道（它读的是真正装上的那个 APK），所以异步取一次。
+    unawaited(_loadAppVersion());
+  }
+
+  Future<void> _loadAppVersion() async {
+    final AppVersion? version = await BrowserBridge.appVersion();
+    if (!mounted) return;
+    setState(() {
+      _appVersion = version;
+      _appVersionRead = true;
+    });
+  }
 
   /// 保存设置。始终以**当前**设置为基准改写，避免用界面上捕获的旧快照
   /// 覆盖掉刚刚改过的其它设置。
@@ -154,6 +180,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _parentalCard(settings),
       const SizedBox(height: 16),
       _dangerCard(),
+      const SizedBox(height: 16),
+      _aboutCard(),
     ];
 
     return Scaffold(
@@ -805,6 +833,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
         const HintText('修改端口或根目录后会自动重启服务器；本地页面同样受白名单 / 黑名单约束。'),
+      ],
+    );
+  }
+
+  // ------------------------------------------------------------ 关于
+
+  /// 「关于」：应用名、**本机真正安装的**版本号与包名。
+  ///
+  /// 版本号来自原生层（packageManager），所以升级后这里显示的就是升级后的
+  /// 版本；读不到时如实显示「未知」，不拿一个编译期常量冒充。
+  Widget _aboutCard() {
+    final String version = _appVersion?.label ??
+        (_appVersionRead ? '未知（无法读取）' : '读取中…');
+    return SectionCard(
+      title: '关于',
+      subtitle: '本机安装的应用信息，报问题时请连同这个版本号一起说明。',
+      icon: Icons.info_outline,
+      trailing: RuleChip(version, icon: Icons.new_releases_outlined),
+      children: <Widget>[
+        _aboutRow(Icons.apps_outlined, '应用', '平板浏览器'),
+        const SizedBox(height: 8),
+        _aboutRow(Icons.tag_outlined, '版本', version, key: aboutVersionKey),
+        const SizedBox(height: 8),
+        _aboutRow(Icons.android_outlined, '包名', 'com.xstocker.tabletbrowser'),
+      ],
+    );
+  }
+
+  Widget _aboutRow(IconData icon, String label, String value, {Key? key}) {
+    final ThemeData theme = Theme.of(context);
+    return Row(
+      key: key,
+      children: <Widget>[
+        Icon(icon, size: 18, color: theme.colorScheme.onSurfaceVariant),
+        const SizedBox(width: 10),
+        SizedBox(
+          width: 64,
+          child: Text(label, style: theme.textTheme.bodyMedium),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
       ],
     );
   }

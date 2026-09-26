@@ -344,7 +344,32 @@ class _BrowserScreenState extends State<BrowserScreen> {
     final bookmark = state.bookmarkFor(tab.url);
     if (bookmark == null) return;
     if (!_thumbnailRefreshed.add(bookmark.id)) return;
-    unawaited(_capturePreview(tab, bookmark));
+    unawaited(_refinePreview(tab, bookmark));
+  }
+
+  /// Photographs a freshly opened bookmark once, then again as the page settles.
+  ///
+  /// A heavy local page is the reason this exists: a flipbook's shell reports
+  /// "finished" in milliseconds while its player keeps painting for seconds, so
+  /// the 900 ms picture was the player's **loading screen**, and that is what the
+  /// home tile kept showing. The early frame is still stored (the tile is never
+  /// left empty) and later frames replace it, so what stays on the home page is
+  /// the page as it really looks once it has finished drawing.
+  Future<void> _refinePreview(BrowserTab tab, Bookmark bookmark) async {
+    for (final delay in const [
+      Duration(milliseconds: 900),
+      Duration(seconds: 4),
+      Duration(seconds: 9),
+    ]) {
+      await Future<void>.delayed(delay);
+      if (!mounted || tab.blocked != null || tab.url == UrlResolver.homeUrl) return;
+      final state = _state;
+      if (state == null) return;
+      // The tab may have navigated on, or the bookmark been deleted.
+      final current = state.bookmarkFor(tab.url);
+      if (current == null || current.id != bookmark.id) return;
+      await _capturePreview(tab, bookmark);
+    }
   }
 
   /// The ⋮ menu action: force a fresh screenshot of the current page.

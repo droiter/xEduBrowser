@@ -109,8 +109,19 @@ class _ThumbnailCaptureScreenState extends State<_ThumbnailCaptureScreen> {
     // when it refreshes a bookmark tile.
     await Future<void>.delayed(const Duration(milliseconds: 900));
     if (!mounted || _done) return;
-    final bytes = await BrowserBridge.captureThumbnail(_viewId, maxWidth: 480);
+    final first = await BrowserBridge.captureThumbnail(_viewId, maxWidth: 480);
     if (!mounted || _done) return;
+
+    // And once more a few seconds later: a local flipbook's shell reports
+    // "finished" immediately while its player paints the cover seconds later, so
+    // the early frame is the player's loading screen. The later frame wins when
+    // it produced anything at all.
+    await Future<void>.delayed(const Duration(milliseconds: 2800));
+    if (!mounted || _done) return;
+    final second = await BrowserBridge.captureThumbnail(_viewId, maxWidth: 480);
+    if (!mounted || _done) return;
+
+    final bytes = (second != null && second.isNotEmpty) ? second : first;
     // A blank or failed capture is not a result: leaving the route open lets the
     // timeout decide, and the caller falls back to the generated tile.
     if (bytes == null || bytes.isEmpty) return;

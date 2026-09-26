@@ -237,11 +237,43 @@ class MainActivity : FlutterActivity() {
                     result.success(hasAllFilesAccess())
                 }
 
+                // The installed package's own version, for the settings screen's
+                // 关于 card. Read from the package manager rather than compiled
+                // in, so it always names the APK that is actually installed.
+                "appVersion" -> {
+                    result.success(appVersion())
+                }
+
                 else -> result.notImplemented()
             }
         } catch (t: Throwable) {
             result.error("native_error", t.message ?: t.toString(), null)
         }
+    }
+
+    /// `versionName` + `versionCode` of the installed package.
+    ///
+    /// The deprecated `getPackageInfo(String, int)` overload is kept for API 24
+    /// and only bypassed where the platform requires it, so the same code runs on
+    /// both ends of the supported range.
+    private fun appVersion(): Map<String, Any> {
+        val manager = packageManager
+        val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            manager.getPackageInfo(packageName, android.content.pm.PackageManager.PackageInfoFlags.of(0))
+        } else {
+            @Suppress("DEPRECATION")
+            manager.getPackageInfo(packageName, 0)
+        }
+        val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            info.versionCode.toLong()
+        }
+        return mapOf(
+            "versionName" to (info.versionName ?: ""),
+            "versionCode" to code,
+        )
     }
 
     private fun historyState(view: PolicyWebView): Map<String, Any?> = mapOf(

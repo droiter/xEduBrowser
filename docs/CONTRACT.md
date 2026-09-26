@@ -81,6 +81,9 @@ All take a `viewId` (except the global ones) and return a `Map` or `bool`.
 | `disposeView` | `viewId` | `{ok}` |
 | `clearCache` / `clearCookies` / `clearHistory` | — | `{ok}` |
 | `userAgent` | `viewId` | `String?` |
+| `openManageStorageSettings` | — | `{ok}` — opens the system all-files-access screen |
+| `hasAllFilesAccess` | — | `bool` — whether MANAGE_EXTERNAL_STORAGE is really held |
+| `appVersion` | — | `{versionName: String, versionCode: int}` — the **installed** package's version, shown in the settings 关于 card |
 
 ### native -> Dart events on `tablet_browser/events`
 

@@ -18,36 +18,85 @@ const Key homeEditModeButtonKey = ValueKey<String>('home-edit-mode');
 const Key homeEditDoneKey = ValueKey<String>('home-edit-done');
 
 /// The home page bookmark wall: one section per category, each a grid of square
-/// tiles with the title underneath.
+/// tiles with the title underneath, with the starred 我的最爱 section pinned on
+/// top.
 ///
 /// Tiles can be dragged onto one another to change their order inside a
 /// category, and dragged from one category into another. A section header folds
 /// its category shut, so a wall with several subjects fits on one screen. There
 /// is deliberately no add/delete control here — bookmarks are managed in the
 /// settings screen, or from [editing] mode, which a parent unlocks with the
-/// parental password.
+/// parental password. Hidden bookmarks are left out unless [editing] is on, so
+/// the parent can always bring one back.
 class BookmarkGrid extends StatelessWidget {
   const BookmarkGrid({super.key, required this.onOpen, this.editing = false});
 
   /// Opens a bookmark's URL through the browser's policy gate.
   final ValueChanged<String> onOpen;
 
-  /// Edit mode: each bookmark gets 改标题 / 改分类 / 重做预览图 / 删除 buttons, and
-  /// the wall is rendered as a list so the buttons have room.
+  /// Edit mode: each bookmark gets ★ / 隐藏 / 改标题 / 改分类 / 重做预览图 / 删除
+  /// buttons, the wall is rendered as a list so the buttons have room, and
+  /// hidden bookmarks are shown again.
   final bool editing;
+
+  /// Section id of the pinned 我的最爱 section.
+  ///
+  /// Starts with a NUL so it can never collide with a real category id, and it
+  /// only names the fold state — 我的最爱 is a view, not a stored category.
+  static const String favoritesSectionId = '\u0000favorites';
 
   @override
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
-    final sections = state.populatedCategoryIds;
+
+    /// The bookmarks a section may show: every one in edit mode (so a hidden
+    /// tile can be brought back), only the visible ones for the child.
+    List<Bookmark> visible(List<Bookmark> bookmarks) => editing
+        ? bookmarks
+        : [for (final b in bookmarks) if (!state.isHiddenOnHome(b)) b];
+
+    // 已经是"孩子能看到的"那一份：隐藏的书签或隐藏分类下的书签都不在里面。
+    final favourites = state.favoriteBookmarks;
+    final sections = <(String, String, List<Bookmark>, bool)>[
+      // The pinned section is a child-facing shortcut. While the wall is being
+      // edited it would just repeat rows that are already listed under their own
+      // category — with their own ★ button — so it gives way there.
+      if (!editing && favourites.isNotEmpty)
+        (favoritesSectionId, '我的最爱', favourites, false),
+      for (final categoryId in state.populatedCategoryIds)
+        // A hidden category's whole section disappears for the child; edit mode
+        // keeps it so the parent can unhide it.
+        if (editing || !state.isCategoryHidden(categoryId))
+          (
+            categoryId,
+            state.categoryLabel(categoryId),
+            visible(state.bookmarksIn(categoryId)),
+            state.isCategoryHidden(categoryId),
+          ),
+    ].where((section) => section.$3.isNotEmpty).toList();
+
+    if (sections.isEmpty) {
+      // Everything the wall could show is hidden. Say so instead of leaving a
+      // blank page — the way back is the pencil.
+      return _HiddenWallNotice(
+        hidden: state.bookmarks.where(state.isHiddenOnHome).length,
+      );
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final categoryId in sections) ...[
+        for (final (id, label, bookmarks, hiddenSection) in sections) ...[
           _CategorySection(
             state: state,
-            categoryId: categoryId,
+            sectionId: id,
+            label: label,
+            bookmarks: bookmarks,
+            hiddenSection: hiddenSection,
+            starred: id == favoritesSectionId,
+            onToggleHidden: id == favoritesSectionId
+                ? null
+                : () => _toggleSectionHidden(state, id),
             onOpen: onOpen,
             editing: editing,
           ),
@@ -56,9 +105,44 @@ class BookmarkGrid extends StatelessWidget {
       ],
     );
   }
+
+  /// Hides a category (and with it every bookmark under it) or shows it again.
+  Future<void> _toggleSectionHidden(AppState state, String categoryId) async {
+    final category = state.categoryById(categoryId);
+    if (category == null) return;
+    await state.setCategoryHidden(category, !category.hidden);
+  }
 }
 
-/// One category: a foldable header plus, while it is open, its tiles.
+/// Shown when every bookmark is hidden: the wall would otherwise be blank.
+class _HiddenWallNotice extends StatelessWidget {
+  const _HiddenWallNotice({required this.hidden});
+
+  final int hidden;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 24),
+      child: Row(
+        children: [
+          Icon(Icons.visibility_off_outlined, size: 18, color: theme.hintColor),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '$hidden 个书签都被隐藏了（书签或它所在的分类）。点右上角的铅笔进入编辑模式，'
+              '再点眼睛图标即可恢复。',
+              style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One section: a foldable header plus, while it is open, its tiles.
 ///
 /// The fold state lives in [AppState] (in memory) rather than in this widget, so
 /// it survives every rebuild of the wall — a tile reorder or a settings visit
@@ -66,31 +150,51 @@ class BookmarkGrid extends StatelessWidget {
 class _CategorySection extends StatelessWidget {
   const _CategorySection({
     required this.state,
-    required this.categoryId,
+    required this.sectionId,
+    required this.label,
+    required this.bookmarks,
     required this.onOpen,
     required this.editing,
+    this.starred = false,
+    this.hiddenSection = false,
+    this.onToggleHidden,
   });
 
   final AppState state;
-  final String categoryId;
+
+  /// Identifies the section for folding and for the test key; for 我的最爱 this
+  /// is [BookmarkGrid.favoritesSectionId], not a real category id.
+  final String sectionId;
+  final String label;
+
+  /// The tiles to show — already filtered by the caller.
+  final List<Bookmark> bookmarks;
+
+  /// The pinned 我的最爱 section, which gets a star in its header.
+  final bool starred;
+
+  /// This category is hidden from the child-facing wall (edit mode only).
+  final bool hiddenSection;
+
+  /// Hides/shows the category; null for the pinned 我的最爱 section.
+  final VoidCallback? onToggleHidden;
+
   final ValueChanged<String> onOpen;
   final bool editing;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final bookmarks = state.bookmarksIn(categoryId);
-    final label = state.categoryLabel(categoryId);
-    final collapsed = state.isCategoryCollapsed(categoryId);
+    final collapsed = state.isCategoryCollapsed(sectionId);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Tooltip(
-          message: collapsed ? '展开这个分类' : '折叠这个分类',
+          message: collapsed ? '展开这一段' : '折叠这一段',
           child: InkWell(
-            key: ValueKey<String>('bookmark-section-$categoryId'),
-            onTap: () => state.toggleCategoryCollapsed(categoryId),
+            key: ValueKey<String>('bookmark-section-$sectionId'),
+            onTap: () => state.toggleCategoryCollapsed(sectionId),
             borderRadius: BorderRadius.circular(8),
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
@@ -102,6 +206,10 @@ class _CategorySection extends StatelessWidget {
                     color: theme.hintColor,
                   ),
                   const SizedBox(width: 4),
+                  if (starred) ...[
+                    const Icon(Icons.star, size: 16, color: Color(0xFFF2B01E)),
+                    const SizedBox(width: 4),
+                  ],
                   Flexible(
                     child: Text(
                       label,
@@ -121,6 +229,30 @@ class _CategorySection extends StatelessWidget {
                     Text(
                       '已折叠',
                       style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
+                    ),
+                  ],
+                  if (hiddenSection) ...[
+                    const SizedBox(width: 8),
+                    Text(
+                      '已隐藏',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.error,
+                      ),
+                    ),
+                  ],
+                  // 隐藏/取消隐藏整个分类：只在编辑模式下给家长看。
+                  if (editing && onToggleHidden != null) ...[
+                    const Spacer(),
+                    IconButton(
+                      key: ValueKey<String>('section-hide-$sectionId'),
+                      tooltip: hiddenSection ? '取消隐藏这个分类' : '隐藏这个分类（首页不显示）',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: onToggleHidden,
+                      icon: Icon(
+                        hiddenSection
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                      ),
                     ),
                   ],
                 ],
@@ -239,6 +371,33 @@ class _EditableBookmarkRow extends StatelessWidget {
     showAppSnackBar(context, '已删除「${bookmark.displayTitle}」');
   }
 
+  /// Stars or unstars the bookmark. 我的最爱 is a section of its own on top of
+  /// the wall; the bookmark stays where it already is as well.
+  Future<void> _toggleFavorite(BuildContext context) async {
+    final star = !bookmark.favorite;
+    await state.toggleFavorite(bookmark);
+    if (!context.mounted) return;
+    showAppSnackBar(
+      context,
+      star
+          ? '已把「${bookmark.displayTitle}」加入我的最爱（同时也还在原分类里）'
+          : '已把「${bookmark.displayTitle}」移出我的最爱',
+    );
+  }
+
+  /// Hides the bookmark from the child-facing wall (edit mode keeps showing it).
+  Future<void> _toggleHidden(BuildContext context) async {
+    final hide = !bookmark.hidden;
+    await state.setHidden(bookmark, hide);
+    if (!context.mounted) return;
+    showAppSnackBar(
+      context,
+      hide
+          ? '已隐藏「${bookmark.displayTitle}」：首页不再显示，点眼睛图标可以恢复'
+          : '已取消隐藏「${bookmark.displayTitle}」',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -247,6 +406,11 @@ class _EditableBookmarkRow extends StatelessWidget {
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
+      // A hidden bookmark is dimmed here so a parent can see at a glance what the
+      // child's wall does not show.
+      color: state.isHiddenOnHome(bookmark)
+          ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.55)
+          : null,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
         child: Row(
@@ -278,7 +442,14 @@ class _EditableBookmarkRow extends StatelessWidget {
                     style: theme.textTheme.bodyLarge,
                   ),
                   Text(
-                    '${state.categoryLabel(bookmark.categoryId)} · ${bookmark.host}',
+                    [
+                      state.categoryLabel(bookmark.categoryId),
+                      bookmark.host,
+                      if (bookmark.favorite) '★ 我的最爱',
+                      if (bookmark.hidden) '已隐藏',
+                      if (!bookmark.hidden && state.isCategoryHidden(bookmark.categoryId))
+                        '分类已隐藏',
+                    ].join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
@@ -293,26 +464,51 @@ class _EditableBookmarkRow extends StatelessWidget {
               ),
             ),
             IconButton(
+              key: ValueKey<String>('edit-favorite-$id'),
+              tooltip: bookmark.favorite ? '移出我的最爱' : '加入我的最爱',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => _toggleFavorite(context),
+              icon: Icon(
+                bookmark.favorite ? Icons.star : Icons.star_border,
+                color: bookmark.favorite ? const Color(0xFFF2B01E) : null,
+              ),
+            ),
+            IconButton(
+              key: ValueKey<String>('edit-hide-$id'),
+              tooltip: bookmark.hidden ? '取消隐藏' : '隐藏（首页不显示）',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => _toggleHidden(context),
+              icon: Icon(
+                bookmark.hidden
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+              ),
+            ),
+            IconButton(
               key: ValueKey<String>('edit-rename-$id'),
               tooltip: '编辑书签名',
+              visualDensity: VisualDensity.compact,
               onPressed: () => _rename(context),
               icon: const Icon(Icons.drive_file_rename_outline),
             ),
             IconButton(
               key: ValueKey<String>('edit-move-$id'),
               tooltip: '变更分类',
+              visualDensity: VisualDensity.compact,
               onPressed: () => _move(context),
               icon: const Icon(Icons.drive_file_move_outline),
             ),
             IconButton(
               key: ValueKey<String>('edit-thumbnail-$id'),
               tooltip: '重新生成预览图',
+              visualDensity: VisualDensity.compact,
               onPressed: () => _regenerate(context),
               icon: const Icon(Icons.image_outlined),
             ),
             IconButton(
               key: ValueKey<String>('edit-delete-$id'),
               tooltip: '删除书签',
+              visualDensity: VisualDensity.compact,
               onPressed: () => _delete(context),
               icon: Icon(Icons.delete_outline, color: theme.colorScheme.error),
             ),

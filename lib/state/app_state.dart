@@ -856,6 +856,94 @@ class AppState extends ChangeNotifier {
 
   Future<void> _persistBookmarks() => bookmarkStore.save(_library);
 
+  // ------------------------------------------------------------ favourites
+
+  /// The pinned 我的最爱 section, in home order: the starred bookmarks the child
+  /// actually sees.
+  ///
+  /// Favourites are grouped by their own category and keep that category's
+  /// order, so a starred tile sits where the wall below it puts it. A bookmark
+  /// that is hidden itself — or whose category is hidden — is left out, because
+  /// hiding is about the child-facing wall.
+  List<Bookmark> get favoriteBookmarks {
+    final starred = <String>{
+      for (final bookmark in _library.bookmarks)
+        if (bookmark.favorite && !isHiddenOnHome(bookmark)) bookmark.id,
+    };
+    if (starred.isEmpty) return const [];
+    return [
+      for (final categoryId in populatedCategoryIds)
+        for (final bookmark in _library.bookmarksIn(categoryId))
+          if (starred.contains(bookmark.id)) bookmark,
+    ];
+  }
+
+  /// Stars or unstars [bookmark] — the 我的最爱 section.
+  ///
+  /// 我的最爱 is a view rather than a category, so the bookmark keeps the
+  /// category it already had and simply appears in both sections; that is what
+  /// "同时添加到我的最爱" asks for.
+  Future<void> toggleFavorite(Bookmark bookmark) async {
+    final current = _bookmarkById(bookmark.id);
+    if (current == null) return;
+    await updateBookmark(current.copyWith(favorite: !current.favorite));
+    logEvent(
+      'bookmark',
+      '${current.favorite ? '移出' : '加入'}我的最爱：「${current.displayTitle}」',
+    );
+  }
+
+  /// Hides [bookmark] from the child-facing home page, or shows it again.
+  ///
+  /// The settings screens and the home page's edit mode keep showing it, so a
+  /// hidden bookmark can always be brought back.
+  Future<void> setHidden(Bookmark bookmark, bool hidden) async {
+    final current = _bookmarkById(bookmark.id);
+    if (current == null) return;
+    await updateBookmark(current.copyWith(hidden: hidden));
+    logEvent('bookmark', '${hidden ? '隐藏' : '取消隐藏'}书签：「${current.displayTitle}」');
+  }
+
+  Bookmark? _bookmarkById(String id) {
+    for (final bookmark in _library.bookmarks) {
+      if (bookmark.id == id) return bookmark;
+    }
+    return null;
+  }
+
+  /// Whether [bookmark] is kept off the child-facing home page.
+  ///
+  /// Two switches count: the bookmark's own hide flag, and its category's —
+  /// hiding a category hides everything filed under it, including entries that
+  /// were individually starred into 我的最爱.
+  bool isHiddenOnHome(Bookmark bookmark) =>
+      bookmark.hidden || isCategoryHidden(bookmark.categoryId);
+
+  /// Whether [categoryId]'s section is hidden on the home page. 未分类 is not a
+  /// real category, so it can never be hidden as a group.
+  bool isCategoryHidden(String categoryId) => categoryById(categoryId)?.hidden ?? false;
+
+  /// Hides a category — and with it every bookmark filed under it — or shows it
+  /// again. Everything stays in the library; only the wall changes.
+  Future<void> setCategoryHidden(BookmarkCategory category, bool hidden) async {
+    final current = categoryById(category.id);
+    if (current == null) return;
+    _library = BookmarkLibrary(
+      categories: [
+        for (final existing in _library.categories)
+          if (existing.id == category.id) existing.copyWith(hidden: hidden) else existing,
+      ],
+      bookmarks: _library.bookmarks,
+    );
+    notifyListeners();
+    await _persistBookmarks();
+    logEvent(
+      'bookmark',
+      '${hidden ? '隐藏' : '取消隐藏'}分类「${current.name}」'
+          '${hidden ? '（该分类下的书签在首页一并隐藏）' : ''}',
+    );
+  }
+
   // ---------------------------------------------------------- categories
 
   Future<BookmarkCategory> addCategory(String name) async {

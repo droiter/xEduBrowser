@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tablet_browser/browser/browser_bridge.dart';
 import 'package:tablet_browser/browser/start_view.dart';
 import 'package:tablet_browser/files/local_files_screen.dart';
 import 'package:tablet_browser/log/request_log_screen.dart';
@@ -135,6 +136,73 @@ void main() {
     await pump(tester, const SettingsScreen());
     expect(find.textContaining('JavaScript'), findsWidgets);
     expect(find.textContaining('本地服务器'), findsWidgets);
+  });
+
+  group('the 关于 card', () {
+    test('labels the version the way the card shows it', () {
+      expect(
+        const AppVersion(name: '1.0.12', code: 2013).label,
+        '1.0.12（构建 2013）',
+      );
+      // A platform that only knows the name (or only the code) still reads
+      // sensibly rather than printing an empty string.
+      expect(const AppVersion(name: '1.0.12', code: 0).label, '1.0.12');
+      expect(const AppVersion(name: '', code: 2013).label, '未知（构建 2013）');
+      expect(const AppVersion(name: '', code: 0).label, '未知');
+      expect(
+        AppVersion.fromMap(<Object?, Object?>{'versionName': ' 1.0.9 ', 'versionCode': 10})
+            .label,
+        '1.0.9（构建 10）',
+      );
+    });
+
+    testWidgets('shows the version the platform reports', (tester) async {
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(
+        const MethodChannel('tablet_browser/commands'),
+        (call) async => call.method == 'appVersion'
+            ? <String, dynamic>{'versionName': '9.9.9', 'versionCode': 42}
+            : null,
+      );
+      addTearDown(() => messenger.setMockMethodCallHandler(
+            const MethodChannel('tablet_browser/commands'),
+            null,
+          ));
+
+      await pump(tester, const SettingsScreen());
+      // The lookup is a platform round trip, so give the real event loop a turn.
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 40)),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('关于'), findsWidgets);
+      expect(
+        find.descendant(
+          of: find.byKey(aboutVersionKey),
+          matching: find.text('9.9.9（构建 42）'),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('says so when the version cannot be read', (tester) async {
+      // No native layer in this test: the host has no package manager to ask.
+      await pump(tester, const SettingsScreen());
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 40)),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.descendant(
+          of: find.byKey(aboutVersionKey),
+          matching: find.text('未知（无法读取）'),
+        ),
+        findsOneWidget,
+      );
+    });
   });
 
   testWidgets('request log renders entries and its empty state', (tester) async {

@@ -304,4 +304,117 @@ void main() {
     await settleIo(tester);
     expect(state.bookmarks, isEmpty);
   });
+
+  testWidgets('starred bookmarks get a pinned 我的最爱 section on top', (tester) async {
+    await tester.runAsync(() async {
+      final lessons = await state.addCategory('课程');
+      final starred = await state.addBookmark(
+          url: 'https://fav.test/', title: '收藏页', categoryId: lessons.id);
+      await state.addBookmark(
+          url: 'https://plain.test/', title: '普通页', categoryId: lessons.id);
+      await state.toggleFavorite(starred);
+    });
+
+    await pumpHome(tester);
+
+    // 最爱的段在最上面，同一个书签同时也留在原分类里。
+    expect(find.text('我的最爱'), findsOneWidget);
+    expect(find.text('收藏页'), findsNWidgets(2));
+    expect(
+      tester.getRect(find.text('我的最爱')).top,
+      lessThan(tester.getRect(find.text('课程')).top),
+    );
+  });
+
+  testWidgets('hiding a category hides its section and every tile in it', (tester) async {
+    late String lessonsId;
+    await tester.runAsync(() async {
+      final lessons = await state.addCategory('课程');
+      lessonsId = lessons.id;
+      final courseware = await state.addBookmark(
+          url: 'https://course.test/', title: '课件', categoryId: lessons.id);
+      await state.addBookmark(url: 'https://news.test/', title: '日报');
+      // 点星进「我的最爱」：分类一隐藏，它也跟着从首页消失。
+      await state.toggleFavorite(courseware);
+    });
+
+    await pumpHome(tester);
+    expect(find.text('课程'), findsWidgets);
+    expect(find.text('课件'), findsNWidgets(2));
+
+    // 编辑模式：分类段带一个眼睛按钮，点它隐藏整个分类。
+    await tester.runAsync(() async => state.setHomeEditMode(true));
+    await tester.pump();
+    await tester.tap(find.byKey(ValueKey<String>('section-hide-$lessonsId')));
+    await tester.pumpAndSettle();
+    await settleIo(tester);
+
+    expect(state.isCategoryHidden(lessonsId), isTrue);
+    expect(find.text('已隐藏'), findsWidgets);
+    expect(find.text('课件'), findsOneWidget, reason: '编辑模式下仍看得到，方便恢复');
+
+    // 退出编辑模式：分类段和它下面的书签（含「我的最爱」里的那个）都不显示。
+    await tester.runAsync(() async => state.setHomeEditMode(false));
+    await tester.pump();
+    expect(find.text('课程'), findsNothing);
+    expect(find.text('课件'), findsNothing);
+    expect(find.text('我的最爱'), findsNothing);
+    expect(find.text('日报'), findsOneWidget, reason: '其它分类不受影响');
+  });
+
+  testWidgets('a hidden bookmark is only visible while editing', (tester) async {
+    late String id;
+    await tester.runAsync(() async {
+      final bookmark = await state.addBookmark(
+          url: 'https://hidden.test/', title: '藏起来');
+      id = bookmark.id;
+      await state.setHidden(bookmark, true);
+    });
+
+    await pumpHome(tester);
+    expect(find.text('藏起来'), findsNothing, reason: '非编辑状态不显示');
+    expect(find.textContaining('都被隐藏了'), findsOneWidget);
+
+    await tester.runAsync(() async => state.setHomeEditMode(true));
+    await tester.pump();
+    expect(find.text('藏起来'), findsOneWidget);
+    expect(find.byKey(ValueKey<String>('edit-hide-$id')), findsOneWidget);
+  });
+
+  testWidgets('the edit-mode star adds and removes 我的最爱', (tester) async {
+    late String id;
+    await tester.runAsync(() async {
+      final bookmark = await state.addBookmark(
+          url: 'https://star.test/', title: '点星');
+      id = bookmark.id;
+      state.setHomeEditMode(true);
+    });
+
+    await pumpHome(tester);
+    // 编辑模式下不重复显示置顶段，星标就在每一行上。
+    expect(find.text('我的最爱'), findsNothing);
+
+    await tester.tap(find.byKey(ValueKey<String>('edit-favorite-$id')));
+    await tester.pumpAndSettle();
+    await settleIo(tester);
+    expect(state.bookmarks.single.favorite, isTrue);
+    expect(find.textContaining('★ 我的最爱'), findsOneWidget);
+
+    // 退出编辑模式：置顶的「我的最爱」段出现，原分类里也还在。
+    await tester.runAsync(() async => state.setHomeEditMode(false));
+    await tester.pump();
+    expect(find.text('我的最爱'), findsOneWidget);
+    expect(find.text('点星'), findsNWidgets(2));
+
+    // 再取消星标，段就消失。
+    await tester.runAsync(() async => state.setHomeEditMode(true));
+    await tester.pump();
+    await tester.tap(find.byKey(ValueKey<String>('edit-favorite-$id')));
+    await tester.pumpAndSettle();
+    await settleIo(tester);
+    await tester.runAsync(() async => state.setHomeEditMode(false));
+    await tester.pump();
+    expect(state.bookmarks.single.favorite, isFalse);
+    expect(find.text('我的最爱'), findsNothing);
+  });
 }

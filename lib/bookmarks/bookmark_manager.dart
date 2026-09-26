@@ -434,7 +434,9 @@ class _BookmarkRow extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           Text(
-            '${state.categoryLabel(bookmark.categoryId)} · '
+            '${bookmark.favorite ? '★ ' : ''}'
+            '${state.categoryLabel(bookmark.categoryId)}'
+            '${bookmark.hidden ? ' · 已隐藏' : ''} · '
             '${patterns.isEmpty ? '未加入白名单' : '白名单：${patterns.join('、')}'}',
             maxLines: 2,
             style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),

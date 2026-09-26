@@ -67,6 +67,35 @@ void main() {
       expect(uncategorized.map((b) => b.title), ['C', 'A', 'B']);
       expect(uncategorized.map((b) => b.order), [0, 1, 2]);
     });
+    test('hiding a category hides its bookmarks, and survives a reload', () async {
+      final category = await state.addCategory('课程');
+      final other = await state.addCategory('新闻');
+      final bookmark = await add('https://a.test/1', category: category.id, title: 'A');
+      await state.toggleFavorite(bookmark);
+      await add('https://b.test/2', category: other.id, title: 'B');
+
+      await state.setCategoryHidden(category, true);
+
+      expect(state.isCategoryHidden(category.id), isTrue);
+      expect(state.isCategoryHidden(other.id), isFalse);
+      // 分类隐藏会连带它的书签，包括被点星进了「我的最爱」的那个。
+      expect(state.isHiddenOnHome(bookmark), isTrue);
+      expect(state.favoriteBookmarks, isEmpty);
+
+      final reloaded = AppState(
+        store: ConfigStore(directory),
+        settings: const AppSettings(localServerEnabled: false),
+      );
+      await reloaded.load();
+      expect(reloaded.isCategoryHidden(category.id), isTrue);
+      expect(
+        reloaded.isHiddenOnHome(
+          reloaded.bookmarks.firstWhere((b) => b.title == 'A'),
+        ),
+        isTrue,
+      );
+    });
+
     test('deleting a category can take its bookmarks with it', () async {
       final category = await state.addCategory('课程');
       final news = await state.addCategory('新闻');
@@ -256,6 +285,31 @@ void main() {
   });
 
   group('storage migration', () {
+    test('a version 2 file keeps its stored order when read by v3', () async {
+      // 落盘顺序是最新在最前，而 order 是"追加顺序"，两者并不一致：
+      // 升级到 v3 时绝不能用文件顺序重排。
+      File('${directory.path}/bookmarks.json').writeAsStringSync(jsonEncode({
+        'version': 2,
+        'categories': [
+          {'id': 'c1', 'name': '课程'},
+        ],
+        'bookmarks': [
+          {'id': 'b2', 'url': 'https://b.test/', 'title': 'B', 'createdAt': '2026-01-02T00:00:00.000', 'categoryId': 'c1', 'order': 1},
+          {'id': 'b1', 'url': 'https://a.test/', 'title': 'A', 'createdAt': '2026-01-01T00:00:00.000', 'categoryId': 'c1', 'order': 0},
+        ],
+      }));
+
+      final reloaded = AppState(
+        store: ConfigStore(directory),
+        settings: const AppSettings(localServerEnabled: false),
+      );
+      await reloaded.load();
+
+      expect(reloaded.bookmarksIn('c1').map((b) => b.title), ['A', 'B']);
+      // v2 文件没有这两个字段：默认 false。
+      expect(reloaded.bookmarks.every((b) => !b.favorite && !b.hidden), isTrue);
+    });
+
     test('a version 1 file upgrades to 未分类 with the order preserved', () async {
       // Written by hand: the old schema had no categories, categoryId or order.
       File('${directory.path}/bookmarks.json').writeAsStringSync(jsonEncode({

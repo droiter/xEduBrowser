@@ -17,16 +17,30 @@ class BookmarkCategory {
   final String id;
   final String name;
 
-  const BookmarkCategory({required this.id, required this.name});
+  /// Hidden from the child-facing home page — together with every bookmark
+  /// filed under it. The settings screens and the home page's edit mode keep
+  /// showing it, so a parent can always bring it back.
+  final bool hidden;
 
-  BookmarkCategory copyWith({String? name}) =>
-      BookmarkCategory(id: id, name: name ?? this.name);
+  const BookmarkCategory({required this.id, required this.name, this.hidden = false});
 
-  Map<String, dynamic> toJson() => {'id': id, 'name': name};
+  BookmarkCategory copyWith({String? name, bool? hidden}) => BookmarkCategory(
+        id: id,
+        name: name ?? this.name,
+        hidden: hidden ?? this.hidden,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        // Only when true, so an untouched file stays as small as before.
+        if (hidden) 'hidden': true,
+      };
 
   factory BookmarkCategory.fromJson(Map<String, dynamic> json) => BookmarkCategory(
         id: json['id'] as String? ?? '',
         name: json['name'] as String? ?? '',
+        hidden: json['hidden'] as bool? ?? false,
       );
 
   @override
@@ -64,6 +78,18 @@ class Bookmark {
   /// Position inside [categoryId]. Contiguous, starting at 0.
   final int order;
 
+  /// Starred: the bookmark also appears in the pinned 我的最爱 section.
+  ///
+  /// 我的最爱 is a **view**, not a category: a starred bookmark keeps the
+  /// category it already had and is listed in both places — which is what
+  /// "同时添加到我的最爱" asks for.
+  final bool favorite;
+
+  /// Hidden from the child-facing home page. Still listed in the settings
+  /// screens — and on the home page while its edit mode is on, so a parent can
+  /// always unhide it again.
+  final bool hidden;
+
   const Bookmark({
     required this.id,
     required this.url,
@@ -73,6 +99,8 @@ class Bookmark {
     this.whitelistPatterns = const [],
     this.categoryId = uncategorizedId,
     this.order = 0,
+    this.favorite = false,
+    this.hidden = false,
   });
 
   /// The bookmark's own URL prefix rule — the first pattern it granted, or null
@@ -132,6 +160,8 @@ class Bookmark {
     bool clearWhitelistPattern = false,
     String? categoryId,
     int? order,
+    bool? favorite,
+    bool? hidden,
   }) =>
       Bookmark(
         id: id,
@@ -144,6 +174,8 @@ class Bookmark {
             : (whitelistPatterns ?? this.whitelistPatterns),
         categoryId: categoryId ?? this.categoryId,
         order: order ?? this.order,
+        favorite: favorite ?? this.favorite,
+        hidden: hidden ?? this.hidden,
       );
 
   Map<String, dynamic> toJson() => {
@@ -158,6 +190,9 @@ class Bookmark {
         if (whitelistPatterns.isNotEmpty) 'whitelistPatterns': whitelistPatterns,
         if (categoryId.isNotEmpty) 'categoryId': categoryId,
         'order': order,
+        // Only written when true, so an untagged file stays as small as before.
+        if (favorite) 'favorite': true,
+        if (hidden) 'hidden': true,
       };
 
   factory Bookmark.fromJson(Map<String, dynamic> json) {
@@ -177,6 +212,9 @@ class Bookmark {
           : (single != null && single.trim().isNotEmpty ? [single.trim()] : const []),
       categoryId: json['categoryId'] as String? ?? uncategorizedId,
       order: (json['order'] as num?)?.toInt() ?? 0,
+      // Absent in version 2 files, where bookmarks had neither flag.
+      favorite: json['favorite'] as bool? ?? false,
+      hidden: json['hidden'] as bool? ?? false,
     );
   }
 }
@@ -221,12 +259,14 @@ class BookmarkLibrary {
 ///
 /// Storage is versioned. Version 1 had no categories and no explicit order;
 /// such a file is upgraded on load (bookmarks land in 未分类, keeping the order
-/// they were written in) and written back as version 2 on the next save.
+/// they were written in). Version 2 added categories and the per-category order,
+/// version 3 the `favorite` / `hidden` flags — both decode with false defaults,
+/// so a version 2 file keeps its stored order untouched.
 class BookmarkStore {
   BookmarkStore(this.directory);
 
   /// Current on-disk schema version.
-  static const int schemaVersion = 2;
+  static const int schemaVersion = 3;
 
   final Directory directory;
 
@@ -252,10 +292,12 @@ class BookmarkStore {
           if (item is Map) Bookmark.fromJson(Map<String, dynamic>.from(item)),
       ]..removeWhere((b) => b.url.isEmpty || b.id.isEmpty);
 
-      // Version 1 had neither field: fromJson defaults them to 未分类 / 0, and
-      // the order is renumbered from the file order so nothing is lost.
-      final legacy = (raw['version'] as num?)?.toInt() != schemaVersion;
-      final normalised = legacy
+      // Only version 1 needs renumbering: it had no order at all, so the file
+      // order *was* the display order. Version 2 and 3 files carry their own
+      // `order` (which is append-order, not file order — the list is written
+      // newest-first), and renumbering them would scramble the wall.
+      final version = (raw['version'] as num?)?.toInt() ?? 1;
+      final normalised = version < 2
           ? [for (var i = 0; i < bookmarks.length; i++) bookmarks[i].copyWith(order: i)]
           : bookmarks;
 

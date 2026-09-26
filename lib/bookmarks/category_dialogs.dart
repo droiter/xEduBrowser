@@ -124,7 +124,11 @@ Future<void> showImportNameConflictDialog(
 Future<void> showCategoryManagerSheet(BuildContext context) {
   return showModalBottomSheet<void>(
     context: context,
-    builder: (sheetContext) {
+    builder: (sheetContext) => StatefulBuilder(
+      // showModalBottomSheet 的 builder 只跑一次，而且这个子树不会跟着 AppState
+      // 的通知重建（实测：改名/删除/隐藏后内容不刷新）。所以每次改动后用
+      // setSheetState 显式重建一次。
+      builder: (sheetContext, setSheetState) {
       final state = AppScope.read(sheetContext);
       return SafeArea(
         child: ListView(
@@ -139,12 +143,30 @@ Future<void> showCategoryManagerSheet(BuildContext context) {
             ),
             for (final category in state.categories)
               ListTile(
-                leading: const Icon(Icons.folder_outlined),
+                leading: Icon(
+                  category.hidden ? Icons.visibility_off_outlined : Icons.folder_outlined,
+                ),
                 title: Text(category.name),
-                subtitle: Text('${state.bookmarksIn(category.id).length} 个书签'),
+                subtitle: Text(
+                  '${state.bookmarksIn(category.id).length} 个书签'
+                  '${category.hidden ? ' · 已隐藏（首页不显示，含分类下的书签）' : ''}',
+                ),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    IconButton(
+                      key: ValueKey<String>('category-hide-${category.id}'),
+                      tooltip: category.hidden ? '取消隐藏分类' : '隐藏分类（首页不显示）',
+                      icon: Icon(
+                        category.hidden
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                      ),
+                      onPressed: () async {
+                        await state.setCategoryHidden(category, !category.hidden);
+                        setSheetState(() {});
+                      },
+                    ),
                     IconButton(
                       tooltip: '重命名',
                       icon: const Icon(Icons.edit_outlined),
@@ -155,7 +177,9 @@ Future<void> showCategoryManagerSheet(BuildContext context) {
                           initialName: category.name,
                           confirmLabel: '保存',
                         );
-                        if (name != null) await state.renameCategory(category, name);
+                        if (name == null) return;
+                        await state.renameCategory(category, name);
+                        setSheetState(() {});
                       },
                     ),
                     IconButton(
@@ -172,6 +196,7 @@ Future<void> showCategoryManagerSheet(BuildContext context) {
                           category,
                           deleteBookmarks: choice.deleteBookmarks,
                         );
+                        setSheetState(() {});
                       },
                     ),
                   ],
@@ -183,7 +208,9 @@ Future<void> showCategoryManagerSheet(BuildContext context) {
               title: const Text('新建分类'),
               onTap: () async {
                 final name = await showCategoryNameDialog(sheetContext, title: '新建分类');
-                if (name != null) await state.addCategory(name);
+                if (name == null) return;
+                await state.addCategory(name);
+                setSheetState(() {});
               },
             ),
             if (state.categories.isEmpty)
@@ -198,7 +225,8 @@ Future<void> showCategoryManagerSheet(BuildContext context) {
           ],
         ),
       );
-    },
+      },
+    ),
   );
 }
 

@@ -442,6 +442,58 @@ void main() {
     });
   });
 
+  group('favourite and hidden flags', () {
+    test('survive a save/load round trip', () async {
+      final bookmark = await state.addBookmark(url: 'https://a.test/x', title: 'A');
+      await state.toggleFavorite(bookmark);
+      expect(state.favoriteBookmarks.single.id, bookmark.id);
+
+      // 隐藏之后「我的最爱」段里就不该再有它了（隐藏是关于给孩子看的那面墙）。
+      await state.setHidden(bookmark, true);
+      expect(state.bookmarks.single.favorite, isTrue);
+      expect(state.favoriteBookmarks, isEmpty);
+
+      final reloaded = AppState(
+        store: ConfigStore(directory),
+        settings: const AppSettings(localServerEnabled: false),
+      );
+      await reloaded.load();
+
+      expect(reloaded.bookmarks.single.favorite, isTrue);
+      expect(reloaded.bookmarks.single.hidden, isTrue);
+      expect(reloaded.favoriteBookmarks, isEmpty);
+    });
+
+    test('toggling the star twice leaves 我的最爱 empty', () async {
+      final bookmark = await state.addBookmark(url: 'https://a.test/x', title: 'A');
+      await state.toggleFavorite(bookmark);
+      // Same (now stale) instance on purpose: the flag must be flipped on the
+      // bookmark as it is stored, not on the copy the caller is holding.
+      await state.toggleFavorite(bookmark);
+
+      expect(state.bookmarks.single.favorite, isFalse);
+      expect(state.favoriteBookmarks, isEmpty);
+    });
+
+    test('我的最爱 keeps the home order of the categories', () async {
+      final lessons = await state.addCategory('课程');
+      final news = await state.addCategory('新闻');
+      final first = await state.addBookmark(
+          url: 'https://a.test/1', title: 'A', categoryId: lessons.id);
+      final second = await state.addBookmark(
+          url: 'https://b.test/2', title: 'B', categoryId: lessons.id);
+      final third = await state.addBookmark(
+          url: 'https://c.test/3', title: 'C', categoryId: news.id);
+
+      // Starred out of order; the section follows the wall, not the starring.
+      await state.toggleFavorite(third);
+      await state.toggleFavorite(second);
+      await state.toggleFavorite(first);
+
+      expect(state.favoriteBookmarks.map((b) => b.title), ['A', 'B', 'C']);
+    });
+  });
+
   group('editing a bookmark', () {
     test('can revoke every whitelist entry it granted', () async {
       final bookmark = await state.addBookmark(url: 'https://a.test/x', title: 'A');

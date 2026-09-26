@@ -228,6 +228,33 @@ void main() {
     expect(find.text('新建分类'), findsOneWidget);
   });
 
+  testWidgets('the category manager can hide a category', (tester) async {
+    late String categoryId;
+    await tester.runAsync(() async {
+      final category = await state.addCategory('旧课程');
+      categoryId = category.id;
+      await state.addBookmark(
+        url: 'https://a.test/',
+        title: 'A',
+        categoryId: category.id,
+      );
+    });
+
+    await pumpSettings(tester);
+    await tester.tap(find.byKey(manageCategoriesButtonKey));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(ValueKey<String>('category-hide-$categoryId')));
+    // 状态是同步翻的，但面板要等写入完成后的 setSheetState 才刷新，所以等界面。
+    await waitFor(
+      tester,
+      () => find.textContaining('已隐藏').evaluate().isNotEmpty,
+    );
+
+    expect(state.isCategoryHidden(categoryId), isTrue);
+    expect(find.textContaining('已隐藏'), findsWidgets);
+  });
+
   testWidgets('the list can move a multi-selection into another category',
       (tester) async {
     late String lessonsId;

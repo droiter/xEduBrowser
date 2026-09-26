@@ -10,6 +10,8 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Message
 import android.util.Log
+import android.view.InputDevice
+import android.view.MotionEvent
 import android.view.View
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
@@ -113,6 +115,92 @@ internal fun WebSettings.applyPolicySettings(snapshot: WebViewSettings, defaultU
 }
 
 /**
+ * A WebView that lets a **mouse drag work like a finger drag on local pages**.
+ *
+ * Local ebooks are usually Flip PDF style flipbooks whose page-turn is bound to
+ * `touchstart`/`touchmove` handlers that read `changedTouches[0]` — there is no
+ * mouse branch for the drag (only the wheel has one), so dragging with a mouse
+ * attached to the tablet turns no pages while a finger does.
+ *
+ * Rewriting the event as a touchscreen event with a finger tool type is the only
+ * way to satisfy such a page without patching it: the source and tool type are
+ * exactly what Chromium uses to decide whether a page receives touch or mouse
+ * events. It is deliberately limited to local pages (`file://` and the built-in
+ * loopback server), so ordinary web pages keep normal mouse behaviour such as
+ * text selection.
+ */
+private class TouchCompatWebView(context: Context) : WebView(context) {
+
+    /** Set on ACTION_DOWN, so the whole gesture is judged by the page it began on. */
+    private var convertGesture = false
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!MouseDragBridge.isMouse(event)) {
+            return super.onTouchEvent(event)
+        }
+        // 目前 Flutter 的 AndroidView 只把触摸与滚轮转发给平台视图，鼠标按键事件到不了这里
+        // （见 README「已知限制」）。留一条只针对鼠标的日志：一旦哪天事件真的进来了，
+        // 这条日志就是最直接的证据。
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            convertGesture = MouseDragBridge.isLocalPage(url)
+            Log.i(TAG_TOUCH, "mouse DOWN local=$convertGesture url=$url")
+        }
+        val converted = if (convertGesture) MouseDragBridge.toTouch(event) else null
+        return super.onTouchEvent(converted ?: event)
+    }
+
+    private companion object {
+        const val TAG_TOUCH = "TouchCompat"
+    }
+}
+
+/** Translates mouse gestures into touch gestures for pages that only listen to touch. */
+internal object MouseDragBridge {
+
+    /** Pages a mouse should behave on like a finger: local files and the app's own server. */
+    fun isLocalPage(url: String?): Boolean {
+        if (url.isNullOrBlank()) return false
+        return url.startsWith("file://") ||
+            url.startsWith("http://127.0.0.1") ||
+            url.startsWith("https://127.0.0.1")
+    }
+
+    fun isMouse(event: MotionEvent): Boolean =
+        (event.source and InputDevice.SOURCE_MOUSE) == InputDevice.SOURCE_MOUSE ||
+            event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE
+
+    /**
+     * The touchscreen twin of a mouse press/drag/release, or null for an event
+     * that is not part of a drag (hover, scroll, ...).
+     *
+     * Built with the six-argument `obtain`, which is the one overload that is
+     * both public and unambiguous: it produces a single-pointer event whose tool
+     * type is *not* `TOOL_TYPE_MOUSE`, and the source is then set explicitly. The
+     * source and the tool type are the two signals Chromium uses to choose
+     * between touch and mouse delivery, and after this both say "finger".
+     * (The pointer-properties overloads would allow setting the tool type
+     * outright, but they are exactly the ones Kotlin cannot resolve here.)
+     */
+    fun toTouch(event: MotionEvent): MotionEvent? {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE,
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> Unit
+            else -> return null
+        }
+        val touch = MotionEvent.obtain(
+            event.downTime,
+            event.eventTime,
+            event.action,
+            event.x,
+            event.y,
+            event.metaState,
+        )
+        touch.setSource(InputDevice.SOURCE_TOUCHSCREEN)
+        return touch
+    }
+}
+
+/**
  * The Android WebView platform view (`tablet_browser/webview`) with every
  * enforcement point from CONTRACT.md section 2 wired in.
  *
@@ -139,7 +227,7 @@ class PolicyWebView(
 ) : PlatformView {
 
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val webView: WebView = WebView(context)
+    private val webView: WebView = TouchCompatWebView(context)
 
     /** Filtering for this view alone, when it was created with one. */
     private val ownEngine: PolicyEngine? = previewPolicy?.let { PolicyEngine(it) }

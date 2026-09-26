@@ -122,6 +122,38 @@ abstract final class BrowserBridge {
   /// tell "empty folder" from "not allowed" without asking this.
   static Future<bool> hasAllFilesAccess() async =>
       await _invoke<bool>('hasAllFilesAccess') ?? false;
+
+  /// The installed package's version, or null when the platform cannot say
+  /// (a test host, or a failed lookup).
+  static Future<AppVersion?> appVersion() async {
+    final raw = await _invoke<Map<Object?, Object?>>('appVersion');
+    if (raw == null) return null;
+    return AppVersion.fromMap(raw);
+  }
+}
+
+/// The version of the APK that is actually installed, as the platform reports it.
+class AppVersion {
+  const AppVersion({required this.name, required this.code});
+
+  /// `versionName`, e.g. `1.0.12`.
+  final String name;
+
+  /// `versionCode`, e.g. `2013`.
+  final int code;
+
+  /// What the 关于 card shows: `1.0.12（构建 2013）`.
+  String get label {
+    if (name.isEmpty) {
+      return code > 0 ? '未知（构建 $code）' : '未知';
+    }
+    return code > 0 ? '$name（构建 $code）' : name;
+  }
+
+  static AppVersion fromMap(Map<Object?, Object?> raw) => AppVersion(
+        name: (raw['versionName'] as String? ?? '').trim(),
+        code: (raw['versionCode'] as num?)?.toInt() ?? 0,
+      );
 }
 
 /// A normalised view of a native event, so the UI never digs into raw maps.
