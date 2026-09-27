@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'browser/browser_screen.dart';
 import 'state/app_scope.dart';
 import 'state/app_state.dart';
+import 'ui/app_shell.dart';
 import 'ui/theme.dart';
 
 Future<void> main() async {
@@ -48,6 +49,10 @@ class TabletBrowserApp extends StatelessWidget {
           GlobalWidgetsLocalizations.delegate,
           GlobalCupertinoLocalizations.delegate,
         ],
+        // The shell hosts the off-screen capture view the background thumbnail
+        // pass needs; see thumbnail_backfill.dart.
+        builder: (BuildContext context, Widget? child) =>
+            AppShell(child: child ?? const SizedBox.shrink()),
         home: const BrowserScreen(),
       ),
     );

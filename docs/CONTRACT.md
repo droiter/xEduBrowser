@@ -66,6 +66,10 @@ Native must HTML-escape substituted values.
 
 ### Dart -> native methods on `tablet_browser/commands`
 
+> The background thumbnail pass reuses `captureThumbnail` exactly like the visible
+> capture route: it mounts a throwaway platform view outside the window, loads the
+> page, and asks for the PNG. No extra command exists for it.
+
 All take a `viewId` (except the global ones) and return a `Map` or `bool`.
 
 | Method | Args | Returns |

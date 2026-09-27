@@ -92,6 +92,20 @@ declared but never called).
 A `policy` supplied at platform-view creation replaces the shared engine, i.e.
 views share one policy — matching a policy that is global in the app.
 
+## Background thumbnail backfill
+
+`lib/bookmarks/thumbnail_backfill.dart` keeps filling in the previews of
+bookmarks that never got one (an imported library would otherwise stay a wall of
+letter tiles). `ThumbnailBackfill` owns the decisions — which bookmark, when, how
+long to wait between captures, how long a failure is left alone — and publishes a
+`ThumbnailCaptureRequest`; `AppShell` (in `lib/ui/app_shell.dart`) mounts
+`ThumbnailCaptureHost` for it, which lays the throwaway `PolicyWebView` out
+**outside the window** and wrapped in `IgnorePointer`, so a background capture is
+never visible and can never take a touch. This is the one place where an
+off-screen platform view is deliberately used; it does rasterise (verified on the
+SM-X736C: 90–232 KB PNGs per page while the screen did not change by more than
+0.1 %).
+
 ## Thumbnail capture
 
 `captureThumbnail` (CONTRACT.md section 4) implements the bookmark tiles:

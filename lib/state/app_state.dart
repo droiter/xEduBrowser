@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import '../bookmarks/bookmark.dart';
 import '../bookmarks/bookmark_import.dart';
+import '../bookmarks/thumbnail_backfill.dart';
 import '../files/local_file_url.dart';
 import '../local_server/local_http_server.dart';
 import '../parental/parental_challenge.dart';
@@ -57,6 +58,14 @@ class AppSettings {
   /// Pre-tick "add to whitelist" in the bookmark dialog.
   final bool bookmarkWhitelistByDefault;
 
+  /// Fill in missing bookmark previews in the background, one at a time.
+  ///
+  /// **On by default**: a bookmark only gets a cover when its page happens to be
+  /// opened, so an imported library would stay a wall of letter tiles until
+  /// somebody visited every page. The pass is deliberately slow and only runs
+  /// while the child has been idle (see `ThumbnailBackfill`).
+  final bool backfillThumbnails;
+
   const AppSettings({
     this.javaScript = true,
     this.domStorage = true,
@@ -77,6 +86,7 @@ class AppSettings {
     this.parentalGateQuestionCount = 1,
     this.parentalGateProtectRules = true,
     this.bookmarkWhitelistByDefault = true,
+    this.backfillThumbnails = true,
   });
 
   /// True once a parent password has been configured. While false, the gate
@@ -105,6 +115,7 @@ class AppSettings {
     int? parentalGateQuestionCount,
     bool? parentalGateProtectRules,
     bool? bookmarkWhitelistByDefault,
+    bool? backfillThumbnails,
   }) =>
       AppSettings(
         javaScript: javaScript ?? this.javaScript,
@@ -128,6 +139,7 @@ class AppSettings {
         parentalGateProtectRules: parentalGateProtectRules ?? this.parentalGateProtectRules,
         bookmarkWhitelistByDefault:
             bookmarkWhitelistByDefault ?? this.bookmarkWhitelistByDefault,
+        backfillThumbnails: backfillThumbnails ?? this.backfillThumbnails,
       );
 
   Map<String, dynamic> toJson() => {
@@ -151,6 +163,7 @@ class AppSettings {
         'parentalGateQuestionCount': parentalGateQuestionCount,
         'parentalGateProtectRules': parentalGateProtectRules,
         'bookmarkWhitelistByDefault': bookmarkWhitelistByDefault,
+        'backfillThumbnails': backfillThumbnails,
       };
 
   /// The subset the native side consumes for the WebView.
@@ -189,6 +202,7 @@ class AppSettings {
         parentalGateProtectRules: json['parentalGateProtectRules'] as bool? ?? true,
         bookmarkWhitelistByDefault:
             json['bookmarkWhitelistByDefault'] as bool? ?? true,
+        backfillThumbnails: json['backfillThumbnails'] as bool? ?? true,
       );
 }
 
@@ -1576,9 +1590,26 @@ class AppState extends ChangeNotifier {
         '.${three(time.millisecond)}';
   }
 
+  ThumbnailBackfill? _thumbnailBackfill;
+
+  /// The background pass that fills in bookmarks without a preview.
+  ///
+  /// Created on first use (the app shell asks for it at start-up, tests usually
+  /// never do), so nothing schedules a timer in a test that does not care.
+  ThumbnailBackfill get thumbnailBackfill => _thumbnailBackfill ??= ThumbnailBackfill(
+        candidates: () => _library.bookmarks
+            .where((Bookmark bookmark) => bookmark.thumbnailPath == null)
+            .toList(),
+        save: setBookmarkThumbnail,
+        log: (String tag, String message, {bool warn = false}) =>
+            logEvent(tag, message, level: warn ? LogLevel.warn : LogLevel.info),
+        isEnabled: () => _settings.backfillThumbnails,
+      );
+
   @override
   void dispose() {
     _logNotifyTimer?.cancel();
+    _thumbnailBackfill?.dispose();
     unawaited(_localServer?.stop());
     super.dispose();
   }

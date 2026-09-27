@@ -392,7 +392,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
           subtitle: const Text('添加书签时，同时把它的地址和它所在的网站（本地网页是所在目录）'
               '加进白名单，过滤规则默认放行。'),
         ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: settings.backfillThumbnails,
+          onChanged: (bool value) =>
+              _apply((AppSettings current) => current.copyWith(backfillThumbnails: value)),
+          title: const Text('后台补全没有预览图的书签'),
+          subtitle: const Text('空闲时每隔一会儿抓一张，慢慢把没有预览图的书签补上，'
+              '一次只做一张，不打断正在进行的操作。'),
+        ),
         const HintText(
+          '补图只在「孩子没有在操作」时进行（手一碰屏幕就重新计时），开始时会在诊断日志里'
+          '写明补的是哪一本、还剩几个；起始页、PDF 这类截不到图的书签会保持字母方块。'
           '关闭后书签只保存地址，不再改动白名单；已有的白名单规则不会因此被删除。',
         ),
       ],
