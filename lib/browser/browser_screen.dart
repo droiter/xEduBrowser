@@ -330,31 +330,40 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
   // ------------------------------------------------------------- previews
 
-  /// Refreshes the tile preview of a bookmarked page once it has been shown.
+  /// Fills in the tile preview of a bookmarked page that does not have one yet.
   ///
-  /// A bookmark is added from the settings screen, where there is no page to
-  /// photograph, so the cover is captured the first time the page is actually
-  /// opened in the browser — or refreshed on the next run when the page is
-  /// opened again. The home page then shows the real page instead of the
-  /// generated monogram.
+  /// A bookmark that is imported in bulk has no cover at first, so the picture is
+  /// taken the first time the page is actually opened in the browser, and the home
+  /// page then shows the real page instead of the generated monogram.
+  ///
+  /// **Deliberately one-shot**: a bookmark that already has a picture keeps it.
+  /// Opening the page again — days later, after the site changed — must not
+  /// silently replace the cover the parent picked; "生成后就不要再变" is the rule.
+  /// Replacing an existing picture is an explicit action: 首页编辑模式的
+  /// 「重新生成预览图」, or the ⋮ menu's 「更新当前页预览图」.
   void _maybeRefreshPreview(BrowserTab tab) {
     final state = _state;
     if (state == null || tab != _active) return;
     if (tab.blocked != null || tab.url == UrlResolver.homeUrl) return;
     final bookmark = state.bookmarkFor(tab.url);
     if (bookmark == null) return;
+    final String? thumbnail = bookmark.thumbnailPath;
+    if (thumbnail != null && thumbnail.isNotEmpty) return;
     if (!_thumbnailRefreshed.add(bookmark.id)) return;
     unawaited(_refinePreview(tab, bookmark));
   }
 
-  /// Photographs a freshly opened bookmark once, then again as the page settles.
+  /// Photographs a bookmark that has no cover: once, then again as the page
+  /// settles — still only while it has no cover of its own.
   ///
   /// A heavy local page is the reason this exists: a flipbook's shell reports
   /// "finished" in milliseconds while its player keeps painting for seconds, so
   /// the 900 ms picture was the player's **loading screen**, and that is what the
   /// home tile kept showing. The early frame is still stored (the tile is never
   /// left empty) and later frames replace it, so what stays on the home page is
-  /// the page as it really looks once it has finished drawing.
+  /// the page as it really looks once it has finished drawing. Every frame is
+  /// taken in the same visit: once the bookmark has a picture at all it is never
+  /// touched again by this path.
   Future<void> _refinePreview(BrowserTab tab, Bookmark bookmark) async {
     for (final delay in const [
       Duration(milliseconds: 900),

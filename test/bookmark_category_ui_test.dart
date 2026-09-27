@@ -286,8 +286,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(opened, <String>['https://school.test/lessons']);
-    // 打开网页就离开了编辑模式。
-    expect(state.homeEditMode, isFalse);
+    // 打开网页**不**退出编辑模式：家长点开是为了看页面对不对，回来还要接着改。
+    expect(state.homeEditMode, isTrue);
   });
 
   testWidgets('edit mode renames, moves and deletes with the tile buttons', (

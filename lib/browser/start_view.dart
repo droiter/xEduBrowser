@@ -121,11 +121,10 @@ class _StartViewState extends State<StartView> {
             ),
           const SizedBox(height: 14),
           BookmarkGrid(
-            onOpen: (url) {
-              // Opening a page leaves the wall, so editing ends with it.
-              if (state.homeEditMode) state.setHomeEditMode(false);
-              widget.onNavigate(url);
-            },
+            // 打开网页**不退出编辑模式**：家长常常是点开一条看看页面对不对，
+            // 回到首页还要接着改。而且编辑模式是行布局、非编辑模式是方块布局，
+            // 一进一出就回不到原来那一行了（滚动位置相同、看到的内容却变了）。
+            onOpen: widget.onNavigate,
             editing: state.homeEditMode,
           ),
         ],

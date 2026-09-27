@@ -180,13 +180,14 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// 起始页那面墙的滚动视图。
+  Finder wallScrollable() => find
+      .descendant(of: find.byType(StartView), matching: find.byType(Scrollable))
+      .first;
+
   /// 起始页那面墙当前的滚动位置。
-  double wallOffset(WidgetTester tester) {
-    final scrollable = find
-        .descendant(of: find.byType(StartView), matching: find.byType(Scrollable))
-        .first;
-    return tester.state<ScrollableState>(scrollable).position.pixels;
-  }
+  double wallOffset(WidgetTester tester) =>
+      tester.state<ScrollableState>(wallScrollable()).position.pixels;
 
   /// 铺一墙够长的书签，并把墙滚到「书 12」那里；返回滚到哪儿了。
   Future<double> scrollWallToMiddle(WidgetTester tester) async {
@@ -199,9 +200,7 @@ void main() {
     await tester.scrollUntilVisible(
       find.text('书 12'),
       200,
-      scrollable: find
-          .descendant(of: find.byType(StartView), matching: find.byType(Scrollable))
-          .first,
+      scrollable: wallScrollable(),
     );
     await tester.pumpAndSettle();
     return wallOffset(tester);
@@ -297,6 +296,89 @@ void main() {
       closeTo(before, 1),
       reason: '返回后书签墙应停在点击进入网页前的位置',
     );
+  });
+
+  testWidgets('编辑模式点书签进网页，返回后仍在编辑模式且停在原位置', (tester) async {
+    await tester.runAsync(() async {
+      for (int i = 0; i < 40; i++) {
+        await state.addBookmark(url: 'https://site$i.test/page', title: '书 $i');
+      }
+      // 直接进编辑模式（密码门有自己的测试）。
+      state.setHomeEditMode(true);
+    });
+    await pumpShell(tester);
+    expect(state.homeEditMode, isTrue);
+    final String id = state.bookmarks.firstWhere((b) => b.title == '书 12').id;
+
+    await tester.scrollUntilVisible(
+      find.text('书 12'),
+      200,
+      scrollable: wallScrollable(),
+    );
+    await tester.pumpAndSettle();
+    final double before = wallOffset(tester);
+    expect(before, greaterThan(0), reason: '先得真的把墙滚动起来');
+
+    await tester.tap(find.text('书 12'));
+    await tester.pump();
+    expect(find.byType(PolicyWebView), findsOneWidget);
+    expect(state.homeEditMode, isTrue, reason: '打开网页不应退出编辑模式');
+
+    await pressSystemBack(tester);
+
+    // 回到编辑模式的那一行，而不是被弹回顶部、也不是变回方块墙。
+    expect(find.byType(StartView), findsOneWidget);
+    expect(state.homeEditMode, isTrue, reason: '返回后仍应是编辑模式');
+    expect(find.byKey(ValueKey<String>('edit-row-$id')), findsOneWidget);
+    expect(
+      wallOffset(tester),
+      closeTo(before, 1),
+      reason: '返回后编辑模式应停在点击进入网页前的位置',
+    );
+    expect(find.text('书 12'), findsOneWidget);
+  });
+
+  testWidgets('已有预览图的书签，日后浏览页面不会再自动改图', (tester) async {
+    late String savedPath;
+    await tester.runAsync(() async {
+      final bookmark = await state.addBookmark(
+        url: 'https://school.test/lessons',
+        title: '课程平台',
+      );
+      await state.setBookmarkThumbnail(bookmark, Uint8List.fromList(<int>[1, 2, 3, 4]));
+      savedPath = state.bookmarkFor('https://school.test/lessons')!.thumbnailPath!;
+    });
+    expect(File(savedPath).readAsBytesSync(), <int>[1, 2, 3, 4]);
+
+    await pumpShell(tester);
+    commandCalls.clear();
+    await tester.tap(find.text('课程平台'));
+    await tester.pump();
+    final viewId = tester.widget<PolicyWebView>(find.byType(PolicyWebView)).viewId;
+    await sendNativeEvent(tester, <String, dynamic>{
+      'type': 'pageFinished',
+      'viewId': viewId,
+      'url': 'https://school.test/lessons',
+      'title': '课程平台',
+    });
+    // 老逻辑在 pageFinished 后 900ms 就会重截一张并覆盖，这里给足时间。
+    await tester.pump(const Duration(seconds: 2));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 50)),
+    );
+    await tester.pump();
+
+    expect(
+      commandCalls.where((MethodCall call) => call.method == 'captureThumbnail'),
+      isEmpty,
+      reason: '已经有预览图的书签不该再截图',
+    );
+    expect(
+      state.bookmarkFor('https://school.test/lessons')!.thumbnailPath,
+      savedPath,
+      reason: '预览图生成后就该保持不变',
+    );
+    expect(File(savedPath).readAsBytesSync(), <int>[1, 2, 3, 4]);
   });
 
   testWidgets('opening a bookmarked page captures its tile preview', (
