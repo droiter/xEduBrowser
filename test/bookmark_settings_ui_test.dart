@@ -362,4 +362,34 @@ void main() {
     expect(state.categories, isEmpty);
     expect(state.bookmarks.map((b) => b.title), ['保留']);
   });
+
+  testWidgets('书签卡片有「一键补全预览图」按钮，按下去开始批量补图', (
+    WidgetTester tester,
+  ) async {
+    await tester.runAsync(() async {
+      await state.addBookmark(url: 'https://school.test/a', title: '学校 A');
+      await state.addBookmark(url: 'https://school.test/b', title: '学校 B');
+    });
+    await pumpSettings(tester);
+
+    // 两个书签都还没有预览图，按钮上写明还差几个。
+    final button = find.byKey(generateThumbnailsButtonKey);
+    expect(button, findsOneWidget);
+    expect(find.text('一键补全预览图（2 个）'), findsOneWidget);
+    expect(state.thumbnailBackfill.pendingCount, 2);
+
+    await tester.tap(button);
+    await tester.pump();
+
+    // 按下去就开始跑批量：进度条换成「正在补预览图 x/y」与「停止」。
+    expect(state.thumbnailBackfill.batchRunning, isTrue);
+    expect(state.thumbnailBackfill.batchTotal, 2);
+    expect(find.byKey(stopThumbnailBatchKey), findsOneWidget);
+    expect(find.textContaining('正在补预览图'), findsOneWidget);
+
+    // 收尾：定时器不能留到用例结束（否则 flutter_test 会报 pending timer）。
+    state.thumbnailBackfill.stopBatch();
+    state.thumbnailBackfill.dispose();
+    await tester.pump();
+  });
 }

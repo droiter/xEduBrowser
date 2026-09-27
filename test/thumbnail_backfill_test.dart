@@ -53,6 +53,7 @@ void main() {
   late List<Bookmark> library;
   late List<String> saved;
   late List<String> logs;
+  late Uint8List bytes;
 
   ThumbnailBackfill build({
     bool enabled = true,
@@ -89,6 +90,9 @@ void main() {
       clock: () => now,
     );
     addTearDown(backfill.dispose);
+    // The service never schedules anything by itself, so a test that only reads
+    // counts leaves no timer behind; a test that wants rounds starts it here.
+    backfill.start();
     return backfill;
   }
 
@@ -100,6 +104,7 @@ void main() {
     ];
     saved = <String>[];
     logs = <String>[];
+    bytes = Uint8List.fromList(const <int>[137, 80, 78, 71, 1, 2, 3]);
   });
 
   group('ThumbnailBackfill', () {
@@ -220,6 +225,76 @@ void main() {
       // 回到前台后重新排期，仍然要空闲够久。
       background.setForeground(true);
       expect(timers.lastDelay, const Duration(seconds: 20));
+    });
+
+    test('一键补图：短间隔逐张补完并收尾', () async {
+      final backfill = build();
+
+      backfill.startBatch();
+      expect(backfill.batchRunning, isTrue);
+      expect(backfill.batchTotal, 3);
+      expect(backfill.batchDone, 0);
+      expect(logs.first, contains('一键补图开始：共 3 个待补'));
+      // 按下去就尽快开工（200ms），而不是等一个 gap。
+      expect(timers.lastDelay, const Duration(milliseconds: 200));
+
+      timers.fire();
+      expect(backfill.request!.bookmarkId, 'a');
+      await backfill.complete(bytes);
+      expect(backfill.batchDone, 1);
+      // 批量里两张之间只等 batchGap。
+      expect(timers.lastDelay, const Duration(seconds: 2));
+
+      timers.fire();
+      expect(backfill.request!.bookmarkId, 'b');
+      await backfill.complete(bytes);
+      timers.fire();
+      expect(backfill.request!.bookmarkId, 'c');
+      await backfill.complete(bytes);
+
+      timers.fire();
+      expect(backfill.batchRunning, isFalse);
+      expect(backfill.batchDone, 3);
+      expect(logs.last, contains('一键补图完成：共处理 3/3 个'));
+      // 收尾后回到后台节奏。
+      expect(timers.lastDelay, const Duration(seconds: 45));
+    });
+
+    test('一键补图是用户按的，所以不等空闲', () {
+      final backfill = build();
+      // 刚刚还在操作：后台模式会推迟，批量模式立刻开工。
+      backfill.noteUserActivity();
+
+      backfill.startBatch();
+      timers.fire();
+
+      expect(backfill.request, isNotNull);
+    });
+
+    test('一键补图可以停下来', () async {
+      final backfill = build();
+      backfill.startBatch();
+      timers.fire();
+      await backfill.complete(bytes);
+
+      backfill.stopBatch();
+
+      expect(backfill.batchRunning, isFalse);
+      expect(logs.last, contains('一键补图已停止：完成 1/3 个'));
+      expect(timers.lastDelay, const Duration(seconds: 45));
+      // 停止之后仍然按后台节奏继续（下一轮会在 gap 之后）。
+      timers.fire();
+      expect(backfill.request!.bookmarkId, 'b');
+    });
+
+    test('没有缺图时按下按钮只记一行日志', () {
+      library = <Bookmark>[];
+      final backfill = build();
+
+      backfill.startBatch();
+
+      expect(backfill.batchRunning, isFalse);
+      expect(logs.last, contains('一键补图：没有缺图的书签'));
     });
 
     test('补图期间书签被删掉：不写文件，继续下一张', () async {

@@ -596,7 +596,17 @@ class _TileBody extends StatelessWidget {
     final thumbnail = bookmark.thumbnailPath;
 
     return Tooltip(
-      message: bookmark.url,
+      // 悬停时看到的是书名，不是网址：大字、够久，够家长/孩子读清楚。
+      message: bookmark.displayTitle,
+      textStyle: theme.textTheme.titleLarge?.copyWith(
+        fontSize: 24,
+        fontWeight: FontWeight.w700,
+        height: 1.3,
+        color: theme.colorScheme.onInverseSurface,
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      waitDuration: const Duration(milliseconds: 350),
+      showDuration: const Duration(seconds: 6),
       child: Material(
         color: Colors.transparent,
         child: InkWell(

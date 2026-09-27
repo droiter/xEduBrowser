@@ -38,6 +38,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     backfill.setForeground(
       WidgetsBinding.instance.lifecycleState != AppLifecycleState.paused,
     );
+    backfill.start();
   }
 
   @override

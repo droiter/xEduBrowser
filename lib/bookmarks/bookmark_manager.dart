@@ -33,6 +33,12 @@ const Key deleteSelectedBookmarksKey = ValueKey<String>('settings-bookmarks-dele
 /// The home page shows bookmarks only, so every management action lives here.
 /// Adding a bookmark grants the address **and** the site (or local folder) that
 /// contains it — see [AppState.addBookmark].
+/// 「一键补全预览图」按钮。
+const Key generateThumbnailsButtonKey = ValueKey<String>('bookmark-generate-thumbnails');
+
+/// 批量补图进行中的「停止」按钮。
+const Key stopThumbnailBatchKey = ValueKey<String>('bookmark-stop-thumbnail-batch');
+
 class BookmarkManagerCard extends StatefulWidget {
   const BookmarkManagerCard({super.key});
 
@@ -154,6 +160,46 @@ class _BookmarkManagerCardState extends State<BookmarkManagerCard> {
                 icon: Icon(_selecting ? Icons.close : Icons.checklist_outlined),
                 label: Text(_selecting ? '退出多选' : '多选'),
               ),
+            ListenableBuilder(
+              listenable: state.thumbnailBackfill,
+              builder: (BuildContext context, Widget? _) {
+                final backfill = state.thumbnailBackfill;
+                final missing = backfill.pendingCount;
+                if (backfill.batchRunning) {
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          value: backfill.batchTotal == 0
+                              ? null
+                              : backfill.batchDone / backfill.batchTotal,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text('正在补预览图 ${backfill.batchDone}/${backfill.batchTotal}'),
+                      const SizedBox(width: 8),
+                      TextButton(
+                        key: stopThumbnailBatchKey,
+                        onPressed: backfill.stopBatch,
+                        child: const Text('停止'),
+                      ),
+                    ],
+                  );
+                }
+                return OutlinedButton.icon(
+                  key: generateThumbnailsButtonKey,
+                  onPressed: missing == 0 ? null : backfill.startBatch,
+                  icon: const Icon(Icons.image_outlined),
+                  label: Text(
+                    missing == 0 ? '预览图都已生成' : '一键补全预览图（$missing 个）',
+                  ),
+                );
+              },
+            ),
           ],
         ),
         if (_selecting)

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -444,5 +445,33 @@ void main() {
 
     expect(find.textContaining('整张存储卡'), findsOneWidget);
     expect(find.textContaining('file:///sdcard/page.html'), findsWidgets);
+  });
+
+  testWidgets('书签方块悬停时显示书签名（大字），不再显示网址', (WidgetTester tester) async {
+    await tester.runAsync(() async {
+      await state.addBookmark(url: 'https://school.test/lessons', title: '学校课程');
+    });
+
+    await pumpStart(tester);
+
+    // 提示是书签名……
+    expect(find.byTooltip('学校课程'), findsOneWidget);
+    // ……网址不再出现在提示里。
+    expect(find.byTooltip('https://school.test/lessons'), findsNothing);
+
+    // 真的把鼠标悬上去：提示框出现，而且是大字（方块下面那行小字只有主题的正文尺寸）。
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer(location: Offset.zero);
+    addTearDown(gesture.removePointer);
+    await tester.pump();
+    await gesture.moveTo(tester.getCenter(find.byTooltip('学校课程')));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    final styles = tester
+        .widgetList<Text>(find.text('学校课程'))
+        .map((Text text) => text.style?.fontSize ?? 0)
+        .toList();
+    expect(styles.length, greaterThan(1), reason: '提示框的文字应该同时出现');
+    expect(styles.any((double size) => size >= 20), isTrue, reason: '提示要用大字');
   });
 }

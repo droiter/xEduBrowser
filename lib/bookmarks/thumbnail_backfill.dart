@@ -56,11 +56,71 @@ class ThumbnailBackfill extends ChangeNotifier {
     DateTime Function()? clock,
   })  : _allocateViewId = allocateViewId ?? nextPlatformViewId,
         _scheduleTimer = scheduleTimer ?? ((delay, callback) => Timer(delay, callback)),
-        _clock = clock ?? DateTime.now {
-    // First look happens one gap after start-up: the app is busy restoring its
-    // own state, and nothing here is urgent.
+        _clock = clock ?? DateTime.now;
+
+  /// Whether a one-click batch is running right now.
+  ///
+  /// False once it finished, but the counts below keep the finished run's numbers
+  /// so the button can say "完成 3/3" instead of blanking out.
+  bool get batchRunning => _batch != null && !_batch!.finished;
+
+  /// How many bookmarks the current batch set out to do (0 when idle).
+  int get batchTotal => _batch?.total ?? 0;
+
+  /// How many of them have been processed (success or failure).
+  int get batchDone => _batch?.done ?? 0;
+
+  /// Set by [startBatch]: a one-click run uses a short gap and ignores the idle
+  /// rule, because the user asked for it *now*.
+  _Batch? _batch;
+
+  /// Starts the background pass. Idempotent, and deliberately explicit: creating
+  /// the service must not schedule anything (a test that only reads
+  /// `pendingCount` should not leave a timer behind).
+  void start() {
+    if (_disposed) return;
+    if (_timer != null) return;
+    if (_request != null) return;
+    if (!_foreground) return;
+    // First look one gap from now: start-up is busy, and nothing here is urgent.
     _schedule(gap);
   }
+
+  /// Starts a one-click batch over everything that is missing a preview now.
+  ///
+  /// Unlike the background pass this does not wait for the child to stop
+  /// touching the screen — the button *is* the request — but it still runs one
+  /// capture at a time with [batchGap] between them, so the app stays usable
+  /// while the wall fills in.
+  void startBatch() {
+    if (_disposed || batchRunning) return;
+    final pending = _pending();
+    _batch = _Batch(total: pending.length);
+    if (pending.isEmpty) {
+      log('capture', '一键补图：没有缺图的书签');
+      _batch = null;
+      return;
+    }
+    log('capture', '一键补图开始：共 ${pending.length} 个待补');
+    _batchGap = batchGap;
+    _schedule(const Duration(milliseconds: 200));
+    _notify();
+  }
+
+  /// Stops a running batch after the capture in flight (if any) finishes.
+  void stopBatch() {
+    if (_batch == null || _batch!.finished) return;
+    log('capture', '一键补图已停止：完成 ${_batch!.done}/${_batch!.total} 个');
+    _batch = null;
+    _batchGap = null;
+    _schedule(gap);
+    _notify();
+  }
+
+  /// How long between the captures of a one-click batch.
+  Duration batchGap = const Duration(seconds: 2);
+
+  Duration? _batchGap;
 
   /// Bookmarks that still have no preview, in the order they should be tried.
   final List<Bookmark> Function() candidates;
@@ -132,7 +192,11 @@ class ThumbnailBackfill extends ChangeNotifier {
     if (_foreground == foreground) return;
     _foreground = foreground;
     if (foreground) {
-      _schedule(idleBeforeStart);
+      if (_batch != null) {
+        _schedule(const Duration(milliseconds: 200));
+      } else {
+        _schedule(idleBeforeStart);
+      }
     } else {
       _timer?.cancel();
       _timer = null;
@@ -146,11 +210,13 @@ class ThumbnailBackfill extends ChangeNotifier {
     _request = null;
     _notify();
     if (_disposed) return;
+    _batch?.done++;
+    _notify();
 
     final bookmark = _bookmarkById(request.bookmarkId);
     if (bookmark == null) {
       // Deleted while the capture was in flight: nothing to store.
-      _schedule(gap);
+      _scheduleNext();
       return;
     }
     if (bytes == null || bytes.isEmpty) {
@@ -163,7 +229,7 @@ class ThumbnailBackfill extends ChangeNotifier {
         '（本轮成功 $_done 张，失败 $_failed 张）',
         warn: true,
       );
-      _schedule(gap);
+      _scheduleNext();
       return;
     }
     try {
@@ -180,7 +246,13 @@ class ThumbnailBackfill extends ChangeNotifier {
       _cooldownUntil[request.bookmarkId] = _clock().add(retryCooldown);
       log('capture', '后台补预览图写入失败：「${bookmark.displayTitle}」$error', warn: true);
     }
-    _schedule(gap);
+    _scheduleNext();
+  }
+
+  /// Wait out the gap that fits the current mode, then look again.
+  void _scheduleNext() {
+    final batchDelay = _batchGap;
+    _schedule(batchDelay ?? gap);
   }
 
   @override
@@ -242,17 +314,28 @@ class ThumbnailBackfill extends ChangeNotifier {
       return;
     }
     if (!_foreground) return;
-    if (!isEnabled()) {
+    final batch = _batch;
+    if (batch == null && !isEnabled()) {
       _schedule(gap);
       return;
     }
-    final idleFor = _clock().difference(_lastActivity ?? DateTime.fromMillisecondsSinceEpoch(0));
-    if (_lastActivity != null && idleFor < idleBeforeStart) {
-      _schedule(idleBeforeStart - idleFor);
-      return;
+    if (batch == null) {
+      final idleFor = _clock().difference(_lastActivity ?? DateTime.fromMillisecondsSinceEpoch(0));
+      if (_lastActivity != null && idleFor < idleBeforeStart) {
+        _schedule(idleBeforeStart - idleFor);
+        return;
+      }
     }
     final pending = _pending();
     if (pending.isEmpty) {
+      if (batch != null && !batch.finished) {
+        batch.finished = true;
+        log('capture', '一键补图完成：共处理 ${batch.done}/${batch.total} 个');
+        _batchGap = null;
+        _notify();
+        _schedule(gap);
+        return;
+      }
       if (!_loggedIdle) {
         _loggedIdle = true;
         log('capture', '后台补预览图：没有缺图的书签（本轮共补 $_done 张）');
@@ -269,7 +352,7 @@ class ThumbnailBackfill extends ChangeNotifier {
     );
     log(
       'capture',
-      '后台补预览图开始：「${next.displayTitle}」'
+      '${batch != null ? '一键补图' : '后台补预览图'}开始：「${next.displayTitle}」'
       '（待补 ${pending.length} 个，已完成 $_done 个，失败的 $_failed 个）',
     );
     _notify();
@@ -279,6 +362,15 @@ class ThumbnailBackfill extends ChangeNotifier {
     if (_disposed) return;
     notifyListeners();
   }
+}
+
+/// Progress of a one-click batch.
+class _Batch {
+  _Batch({required this.total});
+
+  final int total;
+  int done = 0;
+  bool finished = false;
 }
 
 /// Hosts the off-screen WebView for one [ThumbnailCaptureRequest].
