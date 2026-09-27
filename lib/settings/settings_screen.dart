@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../bookmarks/bookmark_manager.dart';
+import '../bookmarks/bookmark_manager_screen.dart';
 import '../browser/browser_bridge.dart';
 import '../files/local_files_screen.dart';
 import '../parental/parental_challenge.dart';
@@ -11,6 +11,7 @@ import '../parental/parental_gate.dart';
 import '../parental/parental_password.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
+import '../ui/scroll_page.dart';
 import '../ui/theme.dart';
 
 /// 与原生 WebView 通信的通道名（由浏览器外壳实现，这里只负责调用）。
@@ -162,10 +163,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final bool wide = AppTheme.isWide(context);
 
     final List<Widget> left = <Widget>[
-      // Bookmarks are added here, not on the home page: the home page is the
-      // wall of tiles and nothing else.
-      const BookmarkManagerCard(),
-      const SizedBox(height: 16),
       _webViewCard(settings),
       const SizedBox(height: 16),
       _zoomCard(settings),
@@ -182,6 +179,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _dangerCard(),
       const SizedBox(height: 16),
       _aboutCard(),
+      const SizedBox(height: 16),
+      // 书签管理放在设置的**最后**，而且只放一个入口：点进去是单独一页
+      // （书签条目多、改动频繁，铺在这里会把设置页顶得很长）。
+      _bookmarkManagerCard(state),
     ];
 
     return Scaffold(
@@ -189,28 +190,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
       // 全部设置项都在验证之后：ParentalGate 在解锁前不构建 child，
       // 因此这里的卡片不会出现在界面上，也无法用返回手势以外的办法绕过。
       body: ParentalGate(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: AppTheme.contentMaxWidth),
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-              children: <Widget>[
-                if (wide)
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Expanded(child: Column(children: left)),
-                      const SizedBox(width: 16),
-                      Expanded(child: Column(children: right)),
-                    ],
-                  )
-                else ...<Widget>[
-                  ...left,
-                  ...right,
+        child: ScrollPage(
+          children: <Widget>[
+            if (wide)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Expanded(child: Column(children: left)),
+                  const SizedBox(width: 16),
+                  Expanded(child: Column(children: right)),
                 ],
-              ],
-            ),
-          ),
+              )
+            else ...<Widget>[
+              ...left,
+              ...right,
+            ],
+          ],
         ),
       ),
     );
@@ -405,6 +400,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
           '补图只在「孩子没有在操作」时进行（手一碰屏幕就重新计时），开始时会在诊断日志里'
           '写明补的是哪一本、还剩几个；起始页、PDF 这类截不到图的书签会保持字母方块。'
           '关闭后书签只保存地址，不再改动白名单；已有的白名单规则不会因此被删除。',
+        ),
+      ],
+    );
+  }
+
+  // ---------------------------------------------------------- 书签管理入口
+
+  /// 设置的**最后**一项：书签管理的入口，内容本身在单独一页里。
+  ///
+  /// 只放一个按钮与数量，设置页因此不会被几十条书签撑长；点进去的页面
+  /// 有自己的滚动区域与返回键。
+  Widget _bookmarkManagerCard(AppState state) {
+    final int count = state.bookmarks.length;
+    return SectionCard(
+      title: '书签管理',
+      subtitle: '添加书签、从本地目录导入、分类管理、批量移动 / 删除都在单独一页里；'
+          '首页只放书签方块。',
+      icon: Icons.bookmark_add_outlined,
+      trailing: RuleChip(
+        '$count 个',
+        tone: count == 0 ? ChipTone.warning : ChipTone.allow,
+        icon: Icons.bookmark_outline,
+      ),
+      children: <Widget>[
+        Align(
+          alignment: Alignment.centerLeft,
+          child: FilledButton.icon(
+            key: openBookmarkManagerKey,
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const BookmarkManagerScreen(),
+              ),
+            ),
+            icon: const Icon(Icons.bookmark_border),
+            label: const Text('打开书签管理'),
+          ),
         ),
       ],
     );

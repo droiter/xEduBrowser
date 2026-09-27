@@ -5,8 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tablet_browser/bookmarks/bookmark_manager_screen.dart';
 import 'package:tablet_browser/browser/browser_screen.dart';
 import 'package:tablet_browser/browser/policy_webview.dart';
+import 'package:tablet_browser/browser/start_view.dart';
 import 'package:tablet_browser/files/local_file_url.dart';
 import 'package:tablet_browser/pdf/pdf_reader_screen.dart';
 import 'package:tablet_browser/state/app_scope.dart';
@@ -163,8 +165,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('网页引擎'), findsOneWidget);
-    // The bookmark card, where bookmarks are added now.
-    expect(find.text('添加书签'), findsWidgets);
+    // 书签管理排在设置的最后，是一个通往单独一页的入口。
+    expect(find.byKey(openBookmarkManagerKey), findsOneWidget);
+    expect(find.text('书签管理'), findsWidgets);
   });
 
   /// Simulates the Android back button.
@@ -175,6 +178,33 @@ void main() {
       (_) {},
     );
     await tester.pumpAndSettle();
+  }
+
+  /// 起始页那面墙当前的滚动位置。
+  double wallOffset(WidgetTester tester) {
+    final scrollable = find
+        .descendant(of: find.byType(StartView), matching: find.byType(Scrollable))
+        .first;
+    return tester.state<ScrollableState>(scrollable).position.pixels;
+  }
+
+  /// 铺一墙够长的书签，并把墙滚到「书 12」那里；返回滚到哪儿了。
+  Future<double> scrollWallToMiddle(WidgetTester tester) async {
+    await tester.runAsync(() async {
+      for (int i = 0; i < 40; i++) {
+        await state.addBookmark(url: 'https://site$i.test/page', title: '书 $i');
+      }
+    });
+    await pumpShell(tester);
+    await tester.scrollUntilVisible(
+      find.text('书 12'),
+      200,
+      scrollable: find
+          .descendant(of: find.byType(StartView), matching: find.byType(Scrollable))
+          .first,
+    );
+    await tester.pumpAndSettle();
+    return wallOffset(tester);
   }
 
   testWidgets('back on a page closes the tab and lands on the start page', (
@@ -217,6 +247,56 @@ void main() {
 
     // Nothing to close: the pop is left to the system, which exits the app.
     expect(find.text('还没有书签'), findsOneWidget);
+  });
+
+  testWidgets('从网页返回时，书签墙回到进入网页前的位置', (tester) async {
+    final double before = await scrollWallToMiddle(tester);
+    expect(before, greaterThan(0), reason: '先得真的把墙滚动起来');
+
+    await tester.tap(find.text('书 12'));
+    await tester.pump();
+    expect(find.byType(PolicyWebView), findsOneWidget);
+
+    await pressSystemBack(tester);
+
+    // 回到起始页，而且停在离开时的那一行，不是被弹回顶部。
+    expect(find.byType(StartView), findsOneWidget);
+    expect(
+      wallOffset(tester),
+      closeTo(before, 1),
+      reason: '返回后书签墙应停在点击进入网页前的位置',
+    );
+    expect(find.text('书 12'), findsOneWidget);
+  });
+
+  testWidgets('顶栏后退在没有页内历史时也回起始页（停在原位）', (tester) async {
+    final double before = await scrollWallToMiddle(tester);
+
+    await tester.tap(find.text('书 12'));
+    await tester.pump();
+    expect(find.byType(PolicyWebView), findsOneWidget);
+    // 从书签墙直接打开的一页在 WebView 里没有历史，以前这个按钮是灰的。
+    expect(
+      tester
+          .widget<IconButton>(
+            find.ancestor(
+              of: find.byTooltip('后退'),
+              matching: find.byType(IconButton),
+            ),
+          )
+          .onPressed,
+      isNotNull,
+    );
+
+    await tester.tap(find.byTooltip('后退'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(StartView), findsOneWidget);
+    expect(
+      wallOffset(tester),
+      closeTo(before, 1),
+      reason: '返回后书签墙应停在点击进入网页前的位置',
+    );
   });
 
   testWidgets('opening a bookmarked page captures its tile preview', (

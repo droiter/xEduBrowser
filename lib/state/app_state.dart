@@ -1590,6 +1590,21 @@ class AppState extends ChangeNotifier {
         '.${three(time.millisecond)}';
   }
 
+  /// Where the home wall was scrolled to when the child left it.
+  ///
+  /// Opening a bookmark replaces the wall with the page, so the offset has to
+  /// live outside that widget: coming back — system back, the top bar's 后退 or
+  /// its 起始页 button — should land where the child left off, not at the top of
+  /// the wall. In memory only: a restart starts at the top, which is what a
+  /// fresh launch should look like.
+  double homeScrollOffset = 0;
+
+  /// Records the wall's scroll position. Deliberately silent: this changes on
+  /// every scroll frame and only matters the next time the wall is built.
+  void rememberHomeScrollOffset(double offset) {
+    homeScrollOffset = offset.isFinite && offset > 0 ? offset : 0;
+  }
+
   ThumbnailBackfill? _thumbnailBackfill;
 
   /// The background pass that fills in bookmarks without a preview.

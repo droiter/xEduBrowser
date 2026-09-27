@@ -265,10 +265,17 @@ class _CategorySection extends StatelessWidget {
         if (!collapsed) ...[
           const SizedBox(height: 10),
           if (editing)
-            // Edit mode replaces the wall with rows: the four action buttons
-            // cannot fit under a square tile without squeezing the caption.
+            // Edit mode replaces the wall with rows: the action buttons cannot fit
+            // under a square tile without squeezing the caption. Tapping the row
+            // itself still opens the page — the buttons are for editing, not a
+            // replacement for visiting the site.
             for (final bookmark in bookmarks)
-              _EditableBookmarkRow(key: ValueKey<String>('edit-row-${bookmark.id}'), state: state, bookmark: bookmark)
+              _EditableBookmarkRow(
+                key: ValueKey<String>('edit-row-${bookmark.id}'),
+                state: state,
+                bookmark: bookmark,
+                onOpen: () => onOpen(bookmark.url),
+              )
           else
             GridView.builder(
               shrinkWrap: true,
@@ -320,10 +327,15 @@ class _EditableBookmarkRow extends StatelessWidget {
     super.key,
     required this.state,
     required this.bookmark,
+    required this.onOpen,
   });
 
   final AppState state;
   final Bookmark bookmark;
+
+  /// Opens the page: in edit mode the row is a shortcut to the site as well as a
+  /// place to edit it.
+  final VoidCallback onOpen;
 
   Future<void> _rename(BuildContext context) async {
     final title = await showBookmarkRenameDialog(
@@ -411,108 +423,113 @@ class _EditableBookmarkRow extends StatelessWidget {
       color: state.isHiddenOnHome(bookmark)
           ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.55)
           : null,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
-        child: Row(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: SizedBox(
-                width: 46,
-                height: 46,
-                child: thumbnail == null || thumbnail.isEmpty
-                    ? _Monogram(bookmark: bookmark)
-                    : Image.file(
-                        File(thumbnail),
-                        fit: BoxFit.cover,
-                        cacheWidth: 138,
-                        errorBuilder: (_, _, _) => _Monogram(bookmark: bookmark),
-                      ),
+      child: InkWell(
+        // 缩略图、书名、副标题、行内空白处都能点开网页（右边的按钮各管各的）。
+        onTap: onOpen,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: SizedBox(
+                  width: 46,
+                  height: 46,
+                  child: thumbnail == null || thumbnail.isEmpty
+                      ? _Monogram(bookmark: bookmark)
+                      : Image.file(
+                          File(thumbnail),
+                          fit: BoxFit.cover,
+                          cacheWidth: 138,
+                          errorBuilder: (_, _, _) => _Monogram(bookmark: bookmark),
+                        ),
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    bookmark.displayTitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyLarge,
-                  ),
-                  Text(
-                    [
-                      state.categoryLabel(bookmark.categoryId),
-                      bookmark.host,
-                      if (bookmark.favorite) '★ 我的最爱',
-                      if (bookmark.hidden) '已隐藏',
-                      if (!bookmark.hidden && state.isCategoryHidden(bookmark.categoryId))
-                        '分类已隐藏',
-                    ].join(' · '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
-                  ),
-                  Text(
-                    bookmark.url,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: monoStyle(context, fontSize: 11, color: theme.hintColor),
-                  ),
-                ],
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      bookmark.displayTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyLarge,
+                    ),
+                    Text(
+                      [
+                        state.categoryLabel(bookmark.categoryId),
+                        bookmark.host,
+                        if (bookmark.favorite) '★ 我的最爱',
+                        if (bookmark.hidden) '已隐藏',
+                        if (!bookmark.hidden && state.isCategoryHidden(bookmark.categoryId))
+                          '分类已隐藏',
+                      ].join(' · '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
+                    ),
+                    Text(
+                      bookmark.url,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: monoStyle(context, fontSize: 11, color: theme.hintColor),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            IconButton(
-              key: ValueKey<String>('edit-favorite-$id'),
-              tooltip: bookmark.favorite ? '移出我的最爱' : '加入我的最爱',
-              visualDensity: VisualDensity.compact,
-              onPressed: () => _toggleFavorite(context),
-              icon: Icon(
-                bookmark.favorite ? Icons.star : Icons.star_border,
-                color: bookmark.favorite ? const Color(0xFFF2B01E) : null,
+              IconButton(
+                key: ValueKey<String>('edit-favorite-$id'),
+                tooltip: bookmark.favorite ? '移出我的最爱' : '加入我的最爱',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => _toggleFavorite(context),
+                icon: Icon(
+                  bookmark.favorite ? Icons.star : Icons.star_border,
+                  color: bookmark.favorite ? const Color(0xFFF2B01E) : null,
+                ),
               ),
-            ),
-            IconButton(
-              key: ValueKey<String>('edit-hide-$id'),
-              tooltip: bookmark.hidden ? '取消隐藏' : '隐藏（首页不显示）',
-              visualDensity: VisualDensity.compact,
-              onPressed: () => _toggleHidden(context),
-              icon: Icon(
-                bookmark.hidden
-                    ? Icons.visibility_off_outlined
-                    : Icons.visibility_outlined,
+              IconButton(
+                key: ValueKey<String>('edit-hide-$id'),
+                tooltip: bookmark.hidden ? '取消隐藏' : '隐藏（首页不显示）',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => _toggleHidden(context),
+                icon: Icon(
+                  bookmark.hidden
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                ),
               ),
-            ),
-            IconButton(
-              key: ValueKey<String>('edit-rename-$id'),
-              tooltip: '编辑书签名',
-              visualDensity: VisualDensity.compact,
-              onPressed: () => _rename(context),
-              icon: const Icon(Icons.drive_file_rename_outline),
-            ),
-            IconButton(
-              key: ValueKey<String>('edit-move-$id'),
-              tooltip: '变更分类',
-              visualDensity: VisualDensity.compact,
-              onPressed: () => _move(context),
-              icon: const Icon(Icons.drive_file_move_outline),
-            ),
-            IconButton(
-              key: ValueKey<String>('edit-thumbnail-$id'),
-              tooltip: '重新生成预览图',
-              visualDensity: VisualDensity.compact,
-              onPressed: () => _regenerate(context),
-              icon: const Icon(Icons.image_outlined),
-            ),
-            IconButton(
-              key: ValueKey<String>('edit-delete-$id'),
-              tooltip: '删除书签',
-              visualDensity: VisualDensity.compact,
-              onPressed: () => _delete(context),
-              icon: Icon(Icons.delete_outline, color: theme.colorScheme.error),
-            ),
-          ],
+              IconButton(
+                key: ValueKey<String>('edit-rename-$id'),
+                tooltip: '编辑书签名',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => _rename(context),
+                icon: const Icon(Icons.drive_file_rename_outline),
+              ),
+              IconButton(
+                key: ValueKey<String>('edit-move-$id'),
+                tooltip: '变更分类',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => _move(context),
+                icon: const Icon(Icons.drive_file_move_outline),
+              ),
+              IconButton(
+                key: ValueKey<String>('edit-thumbnail-$id'),
+                tooltip: '重新生成预览图',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => _regenerate(context),
+                icon: const Icon(Icons.image_outlined),
+              ),
+              IconButton(
+                key: ValueKey<String>('edit-delete-$id'),
+                tooltip: '删除书签',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => _delete(context),
+                icon: Icon(Icons.delete_outline, color: theme.colorScheme.error),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -590,80 +607,101 @@ class _TileBody extends StatelessWidget {
   final Bookmark bookmark;
   final VoidCallback onOpen;
 
+  /// 缩略图与书签名之间的间隙；悬停提示的上沿也对齐到这里。
+  static const double captionGap = 6;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final thumbnail = bookmark.thumbnailPath;
 
-    return Tooltip(
-      // 悬停时看到的是书名，不是网址：大字、够久，够家长/孩子读清楚。
-      message: bookmark.displayTitle,
-      textStyle: theme.textTheme.titleLarge?.copyWith(
-        fontSize: 24,
-        fontWeight: FontWeight.w700,
-        height: 1.3,
-        color: theme.colorScheme.onInverseSurface,
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      waitDuration: const Duration(milliseconds: 350),
-      showDuration: const Duration(seconds: 6),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          // The whole tile is tappable, caption included: with the title below
-          // the square, tapping the text must open the bookmark too.
-          onTap: onOpen,
-          borderRadius: BorderRadius.circular(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(14),
-                  child: ColoredBox(
-                    color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        if (thumbnail != null && thumbnail.isNotEmpty)
-                          Image.file(
-                            File(thumbnail),
-                            fit: BoxFit.cover,
-                            cacheWidth: 480,
-                            errorBuilder: (context, error, stack) =>
-                                _Monogram(bookmark: bookmark),
-                          )
-                        else
-                          _Monogram(bookmark: bookmark),
-                        if (bookmark.whitelistPattern != null)
-                          const Positioned(top: 6, right: 6, child: _AllowedBadge()),
-                      ],
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        // The whole tile is tappable, caption included: with the title below
+        // the square, tapping the text must open the bookmark too.
+        onTap: onOpen,
+        borderRadius: BorderRadius.circular(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // 悬停提示挂在**缩略图**上：提示框于是落在缩略图正下方，
+            // 与下面那行书名齐平；内容是书签名、大字，不再是网址。
+            //
+            // 偏移量必须按缩略图高度算，不能写死一个小数字：Tooltip 的位置以
+            // 「目标中心点」为基准（`positionDependentBox`），固定值只会把提示
+            // 压在缩略图中间。半个高度 + 间隙，提示的上沿正好落在书签名那一行。
+            Expanded(
+              child: LayoutBuilder(
+                builder: (BuildContext context, BoxConstraints constraints) {
+                  return Tooltip(
+                    message: bookmark.displayTitle,
+                    textStyle: theme.textTheme.titleLarge?.copyWith(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w700,
+                      height: 1.25,
+                      color: theme.colorScheme.onInverseSurface,
                     ),
-                  ),
-                ),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    constraints: const BoxConstraints(maxWidth: 320),
+                    preferBelow: true,
+                    verticalOffset: constraints.maxHeight / 2 + captionGap,
+                    waitDuration: const Duration(milliseconds: 350),
+                    showDuration: const Duration(seconds: 6),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: ColoredBox(
+                        color: theme.colorScheme.surfaceContainerHighest
+                            .withValues(alpha: 0.6),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            if (thumbnail != null && thumbnail.isNotEmpty)
+                              Image.file(
+                                File(thumbnail),
+                                fit: BoxFit.cover,
+                                cacheWidth: 480,
+                                errorBuilder: (context, error, stack) =>
+                                    _Monogram(bookmark: bookmark),
+                              )
+                            else
+                              _Monogram(bookmark: bookmark),
+                            if (bookmark.whitelistPattern != null)
+                              const Positioned(
+                                top: 6,
+                                right: 6,
+                                child: _AllowedBadge(),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
-              const SizedBox(height: 6),
-              // The caption lives below the square, as specified.
-              Text(
-                bookmark.displayTitle,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  height: 1.25,
-                ),
+            ),
+            const SizedBox(height: captionGap),
+            // The caption lives below the square, as specified.
+            Text(
+              bookmark.displayTitle,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w600,
+                height: 1.25,
               ),
-              const SizedBox(height: 2),
-              Text(
-                bookmark.host,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
-              ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              bookmark.host,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
+            ),
+          ],
         ),
       ),
     );

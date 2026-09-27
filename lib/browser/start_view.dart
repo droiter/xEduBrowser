@@ -10,14 +10,47 @@ import '../ui/theme.dart';
 ///
 /// Rendered by Flutter rather than a WebView so the start page can never be
 /// blocked by the very rules it lets you edit. Bookmarks are normally managed
-/// from the settings screen; the small pencil in the corner opens an **edit
-/// mode** guarded by the parental password for the parent who is already looking
-/// at the wall.
-class StartView extends StatelessWidget {
+/// from the 书签管理 page (设置 → 书签管理); the small pencil in the corner opens
+/// an **edit mode** guarded by the parental password for the parent who is
+/// already looking at the wall.
+///
+/// The wall also remembers where it was scrolled to: opening a page throws this
+/// widget away, so the offset lives in [AppState] and coming back lands on the
+/// same row instead of the top (see [_StartViewState]).
+class StartView extends StatefulWidget {
   const StartView({super.key, required this.onNavigate});
 
   /// Opens a bookmark's URL through the browser's policy gate.
   final ValueChanged<String> onNavigate;
+
+  @override
+  State<StartView> createState() => _StartViewState();
+}
+
+class _StartViewState extends State<StartView> {
+  /// Keeps the wall where the child left it. The offset is handed to [AppState],
+  /// because this widget is disposed the moment a page opens.
+  ScrollController? _controller;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_controller != null) return;
+    final state = AppScope.of(context);
+    _controller = ScrollController(initialScrollOffset: state.homeScrollOffset)
+      ..addListener(() {
+        final controller = _controller;
+        if (controller != null && controller.hasClients) {
+          state.rememberHomeScrollOffset(controller.offset);
+        }
+      });
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
 
   /// Asks for the parental password, then turns edit mode on.
   ///
@@ -54,6 +87,7 @@ class StartView extends StatelessWidget {
     return Material(
       type: MaterialType.transparency,
       child: ListView(
+        controller: _controller,
         padding: const EdgeInsets.fromLTRB(28, 16, 28, 40),
         children: [
           Row(
@@ -90,7 +124,7 @@ class StartView extends StatelessWidget {
             onOpen: (url) {
               // Opening a page leaves the wall, so editing ends with it.
               if (state.homeEditMode) state.setHomeEditMode(false);
-              onNavigate(url);
+              widget.onNavigate(url);
             },
             editing: state.homeEditMode,
           ),

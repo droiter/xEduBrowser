@@ -527,6 +527,26 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _closeTab(_activeIndex);
   }
 
+  // --------------------------------------------------------- top-bar 后退
+
+  /// The ⟵ button: page history first, then the wall.
+  ///
+  /// A page opened straight from a bookmark (or from the block panel) has no
+  /// in-page history, so the browser's own goBack would do nothing and the
+  /// button used to sit disabled — the only way home was the 起始页 button. It
+  /// now falls back to the start page instead. Either way the wall comes back
+  /// at the offset it was left at (see [StartView]), i.e. the child sees the
+  /// screen from before the page was opened, not its top.
+  void _handleBackButton() {
+    final tab = _active;
+    if (tab == null || tab.showsStartView) return;
+    if (tab.canGoBack) {
+      unawaited(tab.controller.goBack());
+      return;
+    }
+    _navigate(_homeUrl);
+  }
+
   // -------------------------------------------------------------- build
 
   @override
@@ -554,7 +574,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 onSelect: _selectTab,
                 onClose: _closeTab,
                 onAddTab: () => _addTab(activate: true),
-                onBack: () => tab?.controller.goBack(),
+                onBack: _handleBackButton,
                 onForward: () => tab?.controller.goForward(),
                 onReload: () {
                   if (tab == null) return;
@@ -700,6 +720,9 @@ class _BrowserTopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // 显示着网页（或拦截面板）时后退键总能按：页内有历史就退一页，
+    // 没有就退回起始页——停在离开时的那一行。起始页上它没有去处，保持禁用。
+    final bool backEnabled = tab != null && !tab!.showsStartView;
     return Container(
       height: 46,
       color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
@@ -708,7 +731,7 @@ class _BrowserTopBar extends StatelessWidget {
           IconButton(
             tooltip: '后退',
             visualDensity: VisualDensity.compact,
-            onPressed: (tab?.canGoBack ?? false) ? onBack : null,
+            onPressed: backEnabled ? onBack : null,
             icon: const Icon(Icons.arrow_back, size: 20),
           ),
           IconButton(

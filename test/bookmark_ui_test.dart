@@ -459,12 +459,16 @@ void main() {
     // ……网址不再出现在提示里。
     expect(find.byTooltip('https://school.test/lessons'), findsNothing);
 
+    // 悬停之前先量好：提示挂在缩略图上，标题在缩略图下面。
+    final Rect thumbnail = tester.getRect(find.byTooltip('学校课程'));
+    final Rect caption = tester.getRect(find.text('学校课程'));
+
     // 真的把鼠标悬上去：提示框出现，而且是大字（方块下面那行小字只有主题的正文尺寸）。
     final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await gesture.addPointer(location: Offset.zero);
     addTearDown(gesture.removePointer);
     await tester.pump();
-    await gesture.moveTo(tester.getCenter(find.byTooltip('学校课程')));
+    await gesture.moveTo(thumbnail.center);
     await tester.pump(const Duration(milliseconds: 400));
 
     final styles = tester
@@ -473,5 +477,26 @@ void main() {
         .toList();
     expect(styles.length, greaterThan(1), reason: '提示框的文字应该同时出现');
     expect(styles.any((double size) => size >= 20), isTrue, reason: '提示要用大字');
+
+    // 大字那一条就是提示框里的文字。
+    final int tooltipIndex = styles.indexWhere((double size) => size >= 20);
+    final Finder tooltipText = find.text('学校课程').at(tooltipIndex);
+    final Rect tooltipBox = tester.getRect(
+      find.ancestor(of: tooltipText, matching: find.byType(DecoratedBox)).first,
+    );
+
+    // 位置：提示框落在**缩略图下方**，不压住缩略图。
+    expect(
+      tooltipBox.top,
+      greaterThanOrEqualTo(thumbnail.bottom),
+      reason: '提示框应该完全落在缩略图下面，而不是压在缩略图中间',
+    );
+    // 与书签标题齐平：提示框上沿就贴在标题那一行。
+    expect(
+      (tooltipBox.top - caption.top).abs(),
+      lessThanOrEqualTo(8),
+      reason: '提示框上沿应与书签标题齐平',
+    );
+    expect(tester.getRect(tooltipText).top, greaterThan(caption.top));
   });
 }

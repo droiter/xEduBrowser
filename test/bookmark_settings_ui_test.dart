@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -7,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tablet_browser/bookmarks/bookmark.dart';
 import 'package:tablet_browser/bookmarks/bookmark_dialog.dart';
 import 'package:tablet_browser/bookmarks/bookmark_manager.dart';
+import 'package:tablet_browser/bookmarks/bookmark_manager_screen.dart';
 import 'package:tablet_browser/bookmarks/bookmark_preview_screen.dart';
 import 'package:tablet_browser/bookmarks/category_dialogs.dart';
 import 'package:tablet_browser/policy/policy_config.dart';
@@ -60,7 +62,13 @@ void main() {
     if (directory.existsSync()) directory.deleteSync(recursive: true);
   });
 
-  Future<void> pumpSettings(WidgetTester tester) async {
+  /// 书签管理现在在设置**最后**的一个入口后面：默认滚过去点开它，
+  /// 后面的断言都在那一页上做。`openBookmarkManager: false` 留在设置页本身
+  /// （测设置页自己的滚动时用）。
+  Future<void> pumpSettings(
+    WidgetTester tester, {
+    bool openBookmarkManager = true,
+  }) async {
     tester.view.physicalSize = const Size(1600, 1600);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -81,6 +89,17 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    if (!openBookmarkManager) return;
+    // 入口排在设置的最后面：先滚过去，再点进去。
+    await tester.scrollUntilVisible(
+      find.byKey(openBookmarkManagerKey),
+      320,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(openBookmarkManagerKey));
+    await tester.pumpAndSettle();
+    expect(find.byType(BookmarkManagerScreen), findsOneWidget);
   }
 
   /// Real file I/O only completes outside the widget test's fake-async zone, so
@@ -104,6 +123,36 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
     }
   }
+
+  testWidgets('书签管理排在设置最后，点进去是单独一页', (tester) async {
+    await pumpSettings(tester, openBookmarkManager: false);
+
+    // 设置页本身不再铺书签：没有添加 / 多选这些控件。
+    expect(find.byKey(addBookmarkButtonKey), findsNothing);
+    expect(find.byKey(multiSelectBookmarksKey), findsNothing);
+
+    // 入口排在最后一栏（在「关于」下面）。
+    await tester.scrollUntilVisible(
+      find.byKey(openBookmarkManagerKey),
+      320,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.getTopLeft(find.byKey(openBookmarkManagerKey)).dy,
+      greaterThan(tester.getTopLeft(find.byKey(aboutVersionKey)).dy),
+      reason: '书签管理的入口应该在设置的最后面',
+    );
+
+    // 点进去：书签的增删改都在这一页上。
+    await tester.tap(find.byKey(openBookmarkManagerKey));
+    await tester.pumpAndSettle();
+    expect(find.byType(BookmarkManagerScreen), findsOneWidget);
+    expect(find.text('书签管理'), findsOneWidget);
+    expect(find.byKey(addBookmarkButtonKey), findsOneWidget);
+    expect(find.byKey(importBookmarksButtonKey), findsOneWidget);
+    expect(find.byKey(manageCategoriesButtonKey), findsOneWidget);
+  });
 
   testWidgets('the add dialog can open the page to confirm its content',
       (tester) async {
@@ -391,5 +440,32 @@ void main() {
     state.thumbnailBackfill.stopBatch();
     state.thumbnailBackfill.dispose();
     await tester.pump();
+  });
+
+  testWidgets('设置页可以用鼠标滚轮上下滚动', (WidgetTester tester) async {
+    // 停在设置页本身（不点进书签管理）来测滚动。
+    await pumpSettings(tester, openBookmarkManager: false);
+
+    // 指针停在页面中间往下滚：内容应该跟着上移（dy 为正 = 滚轮向下）。
+    final double before = tester.getTopLeft(find.text('网页引擎')).dy;
+    final TestPointer pointer = TestPointer(1, PointerDeviceKind.mouse);
+    await tester.sendEventToBinding(
+      pointer.hover(tester.getCenter(find.byType(MaterialApp))),
+    );
+    await tester.pump();
+    await tester.sendEventToBinding(pointer.scroll(const Offset(0, 240)));
+    await tester.pumpAndSettle();
+
+    final double afterDown = tester.getTopLeft(find.text('网页引擎')).dy;
+    expect(afterDown, lessThan(before), reason: '滚轮向下应该让设置页内容上移');
+
+    // 再滚回去：内容应该回到下方。
+    await tester.sendEventToBinding(pointer.scroll(const Offset(0, -240)));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getTopLeft(find.text('网页引擎')).dy,
+      greaterThan(afterDown),
+      reason: '滚轮向上应该让设置页内容下移',
+    );
   });
 }

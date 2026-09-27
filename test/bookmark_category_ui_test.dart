@@ -32,7 +32,10 @@ void main() {
     if (directory.existsSync()) directory.deleteSync(recursive: true);
   });
 
-  Future<void> pumpHome(WidgetTester tester) async {
+  Future<void> pumpHome(
+    WidgetTester tester, {
+    ValueChanged<String>? onNavigate,
+  }) async {
     tester.view.physicalSize = const Size(1500, 1400);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -49,7 +52,7 @@ void main() {
             GlobalCupertinoLocalizations.delegate,
           ],
           home: Scaffold(
-            body: StartView(onNavigate: (_) {}),
+            body: StartView(onNavigate: onNavigate ?? (_) {}),
           ),
         ),
       ),
@@ -258,6 +261,33 @@ void main() {
     await tester.pumpAndSettle();
     expect(state.homeEditMode, isFalse);
     expect(find.byKey(ValueKey<String>('edit-delete-$bookmarkId')), findsNothing);
+  });
+
+  testWidgets('编辑模式下点书签行本身也能打开网页', (tester) async {
+    final opened = <String>[];
+    late Bookmark bookmark;
+    await tester.runAsync(() async {
+      bookmark = await state.addBookmark(
+        url: 'https://school.test/lessons',
+        title: '课程平台',
+      );
+      state.setHomeEditMode(true);
+    });
+
+    await pumpHome(tester, onNavigate: opened.add);
+
+    // 编辑模式把方块换成一行行书签，但这一行仍然是通往网页的入口：
+    // 点书名（缩略图、行内空白处同理）就该打开它。
+    expect(
+      find.byKey(ValueKey<String>('edit-row-${bookmark.id}')),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('课程平台'));
+    await tester.pumpAndSettle();
+
+    expect(opened, <String>['https://school.test/lessons']);
+    // 打开网页就离开了编辑模式。
+    expect(state.homeEditMode, isFalse);
   });
 
   testWidgets('edit mode renames, moves and deletes with the tile buttons', (
