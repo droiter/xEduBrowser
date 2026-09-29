@@ -64,7 +64,7 @@ class _StartViewState extends State<StartView> {
     final bool unlocked = await showParentalPasswordPrompt(
       context,
       title: '进入编辑模式',
-      reason: '编辑模式可以删除书签、改书名、换分类和重做预览图，需要家长密码。',
+      reason: '编辑模式可以改书名、换分类、隐藏、重做预览图和删除书签，需要家长密码。',
     );
     if (!context.mounted || !unlocked) return;
     if (!state.settings.hasParentalPassword) {
@@ -114,8 +114,10 @@ class _StartViewState extends State<StartView> {
             Padding(
               padding: const EdgeInsets.only(top: 2),
               child: Text(
-                '编辑模式：每一行左侧是书签，右侧四个按钮分别是改书名、换分类、'
-                '重做预览图、删除。改完点「完成」退出。',
+                '编辑模式：书签还是原来的方块，每个方块下面是它的操作按钮——'
+                '收藏到我的最爱、隐藏/显示、更改标题、更换分类、强制生成缩略图、删除。'
+                '隐藏的书签排在所属分类最后，隐藏的分类整段排在首页最后；'
+                '改完点「完成」退出。',
                 style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
               ),
             ),

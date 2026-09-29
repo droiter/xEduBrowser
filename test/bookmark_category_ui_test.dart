@@ -245,16 +245,26 @@ void main() {
     expect(find.text('密码不正确'), findsOneWidget);
     expect(state.homeEditMode, isFalse);
 
-    // The right one opens it and shows the four actions.
+    // The right one opens it and shows all six actions.
     await tester.enterText(find.byType(TextField), 'parent-2026');
     await tester.tap(find.widgetWithText(FilledButton, '进入编辑模式'));
     await tester.pumpAndSettle();
 
     expect(state.homeEditMode, isTrue);
-    expect(find.byKey(ValueKey<String>('edit-rename-$bookmarkId')), findsOneWidget);
-    expect(find.byKey(ValueKey<String>('edit-move-$bookmarkId')), findsOneWidget);
-    expect(find.byKey(ValueKey<String>('edit-thumbnail-$bookmarkId')), findsOneWidget);
-    expect(find.byKey(ValueKey<String>('edit-delete-$bookmarkId')), findsOneWidget);
+    for (final String action in <String>[
+      'favorite',
+      'hide',
+      'rename',
+      'move',
+      'thumbnail',
+      'delete',
+    ]) {
+      expect(
+        find.byKey(ValueKey<String>('edit-$action-$bookmarkId')),
+        findsOneWidget,
+        reason: '编辑模式应给出 $action 按钮',
+      );
+    }
 
     // 完成 leaves the mode.
     await tester.tap(find.byKey(homeEditDoneKey));
@@ -276,10 +286,10 @@ void main() {
 
     await pumpHome(tester, onNavigate: opened.add);
 
-    // 编辑模式把方块换成一行行书签，但这一行仍然是通往网页的入口：
-    // 点书名（缩略图、行内空白处同理）就该打开它。
+    // 编辑模式仍然是方块墙（就在原地加了按钮），方块本身还是通往网页的入口：
+    // 点书名（缩略图同理）就该打开它。
     expect(
-      find.byKey(ValueKey<String>('edit-row-${bookmark.id}')),
+      find.byKey(ValueKey<String>('edit-item-${bookmark.id}')),
       findsOneWidget,
     );
     await tester.tap(find.text('课程平台'));
@@ -333,6 +343,130 @@ void main() {
     await tester.pumpAndSettle();
     await settleIo(tester);
     expect(state.bookmarks, isEmpty);
+  });
+
+  testWidgets('编辑模式原地加按钮：还是那面方块墙，按钮加在方块下方', (tester) async {
+    late Bookmark bookmark;
+    await tester.runAsync(() async {
+      bookmark = await state.addBookmark(
+        url: 'https://school.test/lessons',
+        title: '课程平台',
+      );
+      await state.addBookmark(url: 'https://b.test/', title: '隔壁那块');
+    });
+
+    await pumpHome(tester);
+    final Rect firstBefore = tester.getRect(find.byTooltip('课程平台'));
+    final Rect secondBefore = tester.getRect(find.byTooltip('隔壁那块'));
+    expect(secondBefore.left, greaterThan(firstBefore.left));
+    expect(secondBefore.top, firstBefore.top, reason: '非编辑模式是同一行的两块方块');
+
+    await tester.runAsync(() async => state.setHomeEditMode(true));
+    await tester.pumpAndSettle();
+
+    // 还是在首页原地：方块大小、所在列都没变，两块**仍然并排在同一行**——
+    // 编辑模式没有把墙换成另一种布局（以前是一行行书签），按钮只是加在方块下方。
+    final Rect firstInEdit = tester.getRect(find.byTooltip('课程平台'));
+    final Rect secondInEdit = tester.getRect(find.byTooltip('隔壁那块'));
+    expect(firstInEdit.size, firstBefore.size);
+    expect(firstInEdit.left, firstBefore.left);
+    expect(secondInEdit.size, secondBefore.size);
+    expect(secondInEdit.left, secondBefore.left);
+    expect(secondInEdit.top, firstInEdit.top, reason: '编辑模式仍是同一行的方块墙');
+
+    for (final String action in <String>[
+      'favorite',
+      'hide',
+      'rename',
+      'move',
+      'thumbnail',
+      'delete',
+    ]) {
+      final Finder button =
+          find.byKey(ValueKey<String>('edit-$action-${bookmark.id}'));
+      expect(button, findsOneWidget, reason: '缺少 $action 按钮');
+      expect(
+        tester.getRect(button).top,
+        greaterThanOrEqualTo(firstInEdit.bottom - 1),
+        reason: '$action 按钮应排在方块下方',
+      );
+    }
+
+    // 退出编辑模式：按钮消失，方块位置照旧。
+    await tester.runAsync(() async => state.setHomeEditMode(false));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(ValueKey<String>('edit-delete-${bookmark.id}')),
+      findsNothing,
+    );
+    expect(tester.getRect(find.byTooltip('课程平台')).size, firstBefore.size);
+    expect(
+      tester.getRect(find.byTooltip('隔壁那块')).top,
+      tester.getRect(find.byTooltip('课程平台')).top,
+      reason: '退出后两块仍在同一行',
+    );
+  });
+
+  testWidgets('编辑模式下隐藏的书签排到所属分类最后，退出后又消失', (tester) async {
+    await tester.runAsync(() async {
+      final lessons = await state.addCategory('课程');
+      await state.addBookmark(
+          url: 'https://a.test/', title: '甲', categoryId: lessons.id);
+      final middle = await state.addBookmark(
+          url: 'https://b.test/', title: '乙', categoryId: lessons.id);
+      await state.addBookmark(
+          url: 'https://c.test/', title: '丙', categoryId: lessons.id);
+      await state.setHidden(middle, true);
+    });
+
+    await pumpHome(tester);
+    expect(find.text('乙'), findsNothing, reason: '非编辑状态不显示隐藏的书签');
+
+    await tester.runAsync(() async => state.setHomeEditMode(true));
+    await tester.pumpAndSettle();
+
+    // 阅读顺序：同一行比 x，换行比 y。
+    Offset pos(String title) => tester.getTopLeft(find.text(title));
+    bool before(Offset a, Offset b) =>
+        a.dy < b.dy - 1 || ((a.dy - b.dy).abs() <= 1 && a.dx < b.dx);
+
+    expect(find.text('乙'), findsOneWidget, reason: '编辑模式要能看到它才能恢复');
+    expect(before(pos('甲'), pos('乙')), isTrue);
+    expect(before(pos('丙'), pos('乙')), isTrue, reason: '隐藏的书签排在分类最后');
+    expect(find.text('已隐藏'), findsWidgets);
+
+    await tester.runAsync(() async => state.setHomeEditMode(false));
+    await tester.pumpAndSettle();
+    expect(find.text('乙'), findsNothing);
+    expect(before(pos('甲'), pos('丙')), isTrue, reason: '可见的仍按原顺序');
+  });
+
+  testWidgets('编辑模式下隐藏的分类整段排到首页最后', (tester) async {
+    await tester.runAsync(() async {
+      final lessons = await state.addCategory('课程');
+      await state.addBookmark(
+          url: 'https://course.test/', title: '课件', categoryId: lessons.id);
+      await state.addBookmark(url: 'https://news.test/', title: '日报');
+      await state.setCategoryHidden(lessons, true);
+    });
+
+    await pumpHome(tester);
+    expect(find.text('课程'), findsNothing, reason: '非编辑状态整段不显示');
+
+    await tester.runAsync(() async => state.setHomeEditMode(true));
+    await tester.pumpAndSettle();
+
+    expect(find.text('课程'), findsOneWidget, reason: '编辑模式要能看到才能恢复');
+    expect(
+      tester.getRect(find.text('课程')).top,
+      greaterThan(tester.getRect(find.text('未分类')).top),
+      reason: '隐藏的分类排到首页最后',
+    );
+
+    await tester.runAsync(() async => state.setHomeEditMode(false));
+    await tester.pumpAndSettle();
+    expect(find.text('课程'), findsNothing);
+    expect(find.text('课件'), findsNothing);
   });
 
   testWidgets('starred bookmarks get a pinned 我的最爱 section on top', (tester) async {
@@ -421,7 +555,7 @@ void main() {
     });
 
     await pumpHome(tester);
-    // 编辑模式下不重复显示置顶段，星标就在每一行上。
+    // 编辑模式下不重复显示置顶段，星标就在每一块的按钮里。
     expect(find.text('我的最爱'), findsNothing);
 
     await tester.tap(find.byKey(ValueKey<String>('edit-favorite-$id')));

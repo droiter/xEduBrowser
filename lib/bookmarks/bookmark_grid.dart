@@ -2,14 +2,10 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
-import '../pdf/pdf_document.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
-import '../ui/theme.dart';
 import 'bookmark.dart';
-import 'bookmark_dialog.dart';
-import 'category_dialogs.dart';
-import 'thumbnail_capture.dart';
+import 'bookmark_edit_actions.dart';
 
 /// Test hook for the home page's 进入编辑模式 button.
 const Key homeEditModeButtonKey = ValueKey<String>('home-edit-mode');
@@ -34,9 +30,14 @@ class BookmarkGrid extends StatelessWidget {
   /// Opens a bookmark's URL through the browser's policy gate.
   final ValueChanged<String> onOpen;
 
-  /// Edit mode: each bookmark gets ★ / 隐藏 / 改标题 / 改分类 / 重做预览图 / 删除
-  /// buttons, the wall is rendered as a list so the buttons have room, and
-  /// hidden bookmarks are shown again.
+  /// Edit mode: the wall keeps its shape — the very same tiles — and each one
+  /// grows the six management buttons (★ 我的最爱 / 隐藏·显示 / 更改标题 /
+  /// 更换分类 / 强制生成缩略图 / 删除) underneath, wrapped over as many rows as
+  /// they need.
+  ///
+  /// Hidden bookmarks come back **at the end of their category**, and hidden
+  /// categories move to the **end of the page**, so a parent can reach what the
+  /// child cannot see without the visible part of the wall moving around.
   final bool editing;
 
   /// Section id of the pinned 我的最爱 section.
@@ -49,11 +50,31 @@ class BookmarkGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
 
-    /// The bookmarks a section may show: every one in edit mode (so a hidden
-    /// tile can be brought back), only the visible ones for the child.
-    List<Bookmark> visible(List<Bookmark> bookmarks) => editing
-        ? bookmarks
-        : [for (final b in bookmarks) if (!state.isHiddenOnHome(b)) b];
+    /// The bookmarks a section shows, in the order it shows them.
+    ///
+    /// The child never sees a hidden one. Edit mode brings them back — **after**
+    /// the visible ones, so the wall the parent was looking at keeps its shape
+    /// and whatever is currently invisible waits at the end of its category.
+    List<Bookmark> sectionBookmarks(List<Bookmark> bookmarks) {
+      final shown = <Bookmark>[];
+      final hidden = <Bookmark>[];
+      for (final bookmark in bookmarks) {
+        (state.isHiddenOnHome(bookmark) ? hidden : shown).add(bookmark);
+      }
+      if (!editing) return shown;
+      return [...shown, ...hidden];
+    }
+
+    /// Categories in wall order. While editing, the hidden ones move to the end
+    /// of the page (still reachable, no longer mixed in with the visible ones).
+    final List<String> orderedCategoryIds = editing
+        ? [
+            for (final id in state.populatedCategoryIds)
+              if (!state.isCategoryHidden(id)) id,
+            for (final id in state.populatedCategoryIds)
+              if (state.isCategoryHidden(id)) id,
+          ]
+        : state.populatedCategoryIds;
 
     // 已经是"孩子能看到的"那一份：隐藏的书签或隐藏分类下的书签都不在里面。
     final favourites = state.favoriteBookmarks;
@@ -63,14 +84,14 @@ class BookmarkGrid extends StatelessWidget {
       // category — with their own ★ button — so it gives way there.
       if (!editing && favourites.isNotEmpty)
         (favoritesSectionId, '我的最爱', favourites, false),
-      for (final categoryId in state.populatedCategoryIds)
+      for (final categoryId in orderedCategoryIds)
         // A hidden category's whole section disappears for the child; edit mode
         // keeps it so the parent can unhide it.
         if (editing || !state.isCategoryHidden(categoryId))
           (
             categoryId,
             state.categoryLabel(categoryId),
-            visible(state.bookmarksIn(categoryId)),
+            sectionBookmarks(state.bookmarksIn(categoryId)),
             state.isCategoryHidden(categoryId),
           ),
     ].where((section) => section.$3.isNotEmpty).toList();
@@ -265,17 +286,15 @@ class _CategorySection extends StatelessWidget {
         if (!collapsed) ...[
           const SizedBox(height: 10),
           if (editing)
-            // Edit mode replaces the wall with rows: the action buttons cannot fit
-            // under a square tile without squeezing the caption. Tapping the row
-            // itself still opens the page — the buttons are for editing, not a
-            // replacement for visiting the site.
-            for (final bookmark in bookmarks)
-              _EditableBookmarkRow(
-                key: ValueKey<String>('edit-row-${bookmark.id}'),
-                state: state,
-                bookmark: bookmark,
-                onOpen: () => onOpen(bookmark.url),
-              )
+            // Edit mode keeps the wall and adds the controls below each tile —
+            // the parent edits the page in front of them instead of being moved
+            // to another screen. Tapping the tile itself still opens the page:
+            // the buttons are for editing, not a replacement for visiting it.
+            _EditableWall(
+              state: state,
+              bookmarks: bookmarks,
+              onOpen: onOpen,
+            )
           else
             GridView.builder(
               shrinkWrap: true,
@@ -319,219 +338,181 @@ class _CategorySection extends StatelessWidget {
   }
 }
 
-/// One bookmark while the home page is in edit mode: a compact row with the four
-/// management actions a parent needs — rename, change category, regenerate the
-/// preview, delete — without a detour through the settings screen.
-class _EditableBookmarkRow extends StatelessWidget {
-  const _EditableBookmarkRow({
-    super.key,
+/// The wall while the home page is in edit mode: the very same tiles the child
+/// sees, each with its six management buttons wrapped underneath.
+///
+/// A [Wrap] rather than a [GridView]: the buttons need two rows under a tile,
+/// the marker line (★ 我的最爱 / 已隐藏) comes and goes, and a fixed cell aspect
+/// ratio would either overflow or leave a hole. The column width is computed the
+/// way [SliverGridDelegateWithMaxCrossAxisExtent] computes it, so entering edit
+/// mode does not reflow the wall.
+class _EditableWall extends StatelessWidget {
+  const _EditableWall({
+    required this.state,
+    required this.bookmarks,
+    required this.onOpen,
+  });
+
+  final AppState state;
+  final List<Bookmark> bookmarks;
+  final ValueChanged<String> onOpen;
+
+  /// The same numbers the child-facing grid uses (see [_CategorySection]).
+  static const double _maxTileExtent = 190;
+  static const double _crossSpacing = 16;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final double width = constraints.maxWidth;
+        final int columns =
+            (width / (_maxTileExtent + _crossSpacing)).ceil().clamp(1, 64);
+        final double tileWidth =
+            (width - _crossSpacing * (columns - 1)) / columns;
+        return Wrap(
+          spacing: _crossSpacing,
+          runSpacing: 18,
+          children: [
+            for (final bookmark in bookmarks)
+              SizedBox(
+                key: ValueKey<String>('edit-item-${bookmark.id}'),
+                width: tileWidth,
+                child: _EditableTile(
+                  state: state,
+                  bookmark: bookmark,
+                  width: tileWidth,
+                  onOpen: () => onOpen(bookmark.url),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// One bookmark in edit mode: the tile the child sees, its state markers, then
+/// the six actions — wrapped over as many rows as they need.
+///
+/// The tile itself is unchanged and still opens the page; the buttons are for
+/// editing it, and a hidden bookmark is dimmed so a parent can tell at a glance
+/// what the child's wall currently leaves out.
+class _EditableTile extends StatelessWidget {
+  const _EditableTile({
     required this.state,
     required this.bookmark,
+    required this.width,
     required this.onOpen,
   });
 
   final AppState state;
   final Bookmark bookmark;
 
-  /// Opens the page: in edit mode the row is a shortcut to the site as well as a
-  /// place to edit it.
+  /// Width handed out by the wall; only used to reproduce the grid cell's
+  /// height, so the square keeps its size in both modes.
+  final double width;
+
   final VoidCallback onOpen;
 
-  Future<void> _rename(BuildContext context) async {
-    final title = await showBookmarkRenameDialog(
-      context,
-      initialTitle: bookmark.displayTitle,
-    );
-    if (title == null || !context.mounted) return;
-    await state.updateBookmark(bookmark.copyWith(title: title));
-    if (!context.mounted) return;
-    showAppSnackBar(context, '书名已保存');
-  }
-
-  Future<void> _move(BuildContext context) async {
-    final target = await showBookmarkTargetCategoryDialog(context, bookmarkCount: 1);
-    if (target == null || !context.mounted) return;
-    await state.moveBookmarksToCategory([bookmark], categoryId: target);
-    if (!context.mounted) return;
-    showAppSnackBar(context, '已移动到「${state.categoryLabel(target)}」');
-  }
-
-  /// Force a fresh preview image, replacing whatever the tile shows now.
-  Future<void> _regenerate(BuildContext context) async {
-    if (PdfDocuments.localPathOf(bookmark.url) != null) {
-      showAppSnackBar(context, 'PDF 由阅读器按页显示，不生成预览图');
-      return;
-    }
-    showAppSnackBar(context, '正在重新生成「${bookmark.displayTitle}」的预览图…');
-    final bytes = await captureThumbnailFor(context, url: bookmark.url);
-    if (!context.mounted) return;
-    final current = state.bookmarkFor(bookmark.url);
-    if (bytes == null || bytes.isEmpty || current == null) {
-      showAppSnackBar(context, '没能生成预览图，请确认该页面能正常打开后重试', isError: true);
-      return;
-    }
-    await state.setBookmarkThumbnail(current, bytes);
-    if (!context.mounted) return;
-    showAppSnackBar(context, '预览图已重新生成');
-  }
-
-  Future<void> _delete(BuildContext context) async {
-    final removeRule = await confirmBookmarkDelete(context, bookmark: bookmark);
-    if (removeRule == null || !context.mounted) return;
-    await state.removeBookmark(bookmark, removeWhitelistRule: removeRule);
-    if (!context.mounted) return;
-    showAppSnackBar(context, '已删除「${bookmark.displayTitle}」');
-  }
-
-  /// Stars or unstars the bookmark. 我的最爱 is a section of its own on top of
-  /// the wall; the bookmark stays where it already is as well.
-  Future<void> _toggleFavorite(BuildContext context) async {
-    final star = !bookmark.favorite;
-    await state.toggleFavorite(bookmark);
-    if (!context.mounted) return;
-    showAppSnackBar(
-      context,
-      star
-          ? '已把「${bookmark.displayTitle}」加入我的最爱（同时也还在原分类里）'
-          : '已把「${bookmark.displayTitle}」移出我的最爱',
-    );
-  }
-
-  /// Hides the bookmark from the child-facing wall (edit mode keeps showing it).
-  Future<void> _toggleHidden(BuildContext context) async {
-    final hide = !bookmark.hidden;
-    await state.setHidden(bookmark, hide);
-    if (!context.mounted) return;
-    showAppSnackBar(
-      context,
-      hide
-          ? '已隐藏「${bookmark.displayTitle}」：首页不再显示，点眼睛图标可以恢复'
-          : '已取消隐藏「${bookmark.displayTitle}」',
-    );
-  }
+  /// The aspect ratio the child-facing grid gives every cell.
+  static const double _cellAspectRatio = 0.76;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final thumbnail = bookmark.thumbnailPath;
     final id = bookmark.id;
+    final hidden = state.isHiddenOnHome(bookmark);
+    final markers = <String>[
+      if (bookmark.favorite) '★ 我的最爱',
+      if (bookmark.hidden) '已隐藏',
+      if (!bookmark.hidden && state.isCategoryHidden(bookmark.categoryId))
+        '分类已隐藏',
+    ];
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      // A hidden bookmark is dimmed here so a parent can see at a glance what the
-      // child's wall does not show.
-      color: state.isHiddenOnHome(bookmark)
-          ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.55)
-          : null,
-      child: InkWell(
-        // 缩略图、书名、副标题、行内空白处都能点开网页（右边的按钮各管各的）。
-        onTap: onOpen,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
-          child: Row(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: SizedBox(
-                  width: 46,
-                  height: 46,
-                  child: thumbnail == null || thumbnail.isEmpty
-                      ? _Monogram(bookmark: bookmark)
-                      : Image.file(
-                          File(thumbnail),
-                          fit: BoxFit.cover,
-                          cacheWidth: 138,
-                          errorBuilder: (_, _, _) => _Monogram(bookmark: bookmark),
-                        ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      bookmark.displayTitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyLarge,
-                    ),
-                    Text(
-                      [
-                        state.categoryLabel(bookmark.categoryId),
-                        bookmark.host,
-                        if (bookmark.favorite) '★ 我的最爱',
-                        if (bookmark.hidden) '已隐藏',
-                        if (!bookmark.hidden && state.isCategoryHidden(bookmark.categoryId))
-                          '分类已隐藏',
-                      ].join(' · '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
-                    ),
-                    Text(
-                      bookmark.url,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: monoStyle(context, fontSize: 11, color: theme.hintColor),
-                    ),
-                  ],
-                ),
-              ),
-              IconButton(
-                key: ValueKey<String>('edit-favorite-$id'),
-                tooltip: bookmark.favorite ? '移出我的最爱' : '加入我的最爱',
-                visualDensity: VisualDensity.compact,
-                onPressed: () => _toggleFavorite(context),
-                icon: Icon(
-                  bookmark.favorite ? Icons.star : Icons.star_border,
-                  color: bookmark.favorite ? const Color(0xFFF2B01E) : null,
-                ),
-              ),
-              IconButton(
-                key: ValueKey<String>('edit-hide-$id'),
-                tooltip: bookmark.hidden ? '取消隐藏' : '隐藏（首页不显示）',
-                visualDensity: VisualDensity.compact,
-                onPressed: () => _toggleHidden(context),
-                icon: Icon(
-                  bookmark.hidden
-                      ? Icons.visibility_off_outlined
-                      : Icons.visibility_outlined,
-                ),
-              ),
-              IconButton(
-                key: ValueKey<String>('edit-rename-$id'),
-                tooltip: '编辑书签名',
-                visualDensity: VisualDensity.compact,
-                onPressed: () => _rename(context),
-                icon: const Icon(Icons.drive_file_rename_outline),
-              ),
-              IconButton(
-                key: ValueKey<String>('edit-move-$id'),
-                tooltip: '变更分类',
-                visualDensity: VisualDensity.compact,
-                onPressed: () => _move(context),
-                icon: const Icon(Icons.drive_file_move_outline),
-              ),
-              IconButton(
-                key: ValueKey<String>('edit-thumbnail-$id'),
-                tooltip: '重新生成预览图',
-                visualDensity: VisualDensity.compact,
-                onPressed: () => _regenerate(context),
-                icon: const Icon(Icons.image_outlined),
-              ),
-              IconButton(
-                key: ValueKey<String>('edit-delete-$id'),
-                tooltip: '删除书签',
-                visualDensity: VisualDensity.compact,
-                onPressed: () => _delete(context),
-                icon: Icon(Icons.delete_outline, color: theme.colorScheme.error),
-              ),
-            ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Opacity(
+          opacity: hidden ? 0.6 : 1,
+          child: SizedBox(
+            height: width / _cellAspectRatio,
+            child: _TileBody(bookmark: bookmark, onOpen: onOpen),
           ),
         ),
-      ),
+        if (markers.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(
+            markers.join(' · '),
+            maxLines: 2,
+            textAlign: TextAlign.center,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: hidden ? theme.colorScheme.error : theme.hintColor,
+            ),
+          ),
+        ],
+        const SizedBox(height: 4),
+        Wrap(
+          alignment: WrapAlignment.center,
+          children: [
+            IconButton(
+              key: ValueKey<String>('edit-favorite-$id'),
+              tooltip: bookmark.favorite ? '移出我的最爱' : '收藏到我的最爱',
+              visualDensity: VisualDensity.compact,
+              onPressed: () =>
+                  BookmarkEditActions.toggleFavorite(context, state, bookmark),
+              icon: Icon(
+                bookmark.favorite ? Icons.star : Icons.star_border,
+                color: bookmark.favorite ? const Color(0xFFF2B01E) : null,
+              ),
+            ),
+            IconButton(
+              key: ValueKey<String>('edit-hide-$id'),
+              tooltip: bookmark.hidden ? '取消隐藏' : '隐藏（首页不显示）',
+              visualDensity: VisualDensity.compact,
+              onPressed: () =>
+                  BookmarkEditActions.toggleHidden(context, state, bookmark),
+              icon: Icon(
+                bookmark.hidden
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+              ),
+            ),
+            IconButton(
+              key: ValueKey<String>('edit-rename-$id'),
+              tooltip: '更改标题',
+              visualDensity: VisualDensity.compact,
+              onPressed: () =>
+                  BookmarkEditActions.rename(context, state, bookmark),
+              icon: const Icon(Icons.drive_file_rename_outline),
+            ),
+            IconButton(
+              key: ValueKey<String>('edit-move-$id'),
+              tooltip: '更换分类',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => BookmarkEditActions.move(context, state, bookmark),
+              icon: const Icon(Icons.drive_file_move_outline),
+            ),
+            IconButton(
+              key: ValueKey<String>('edit-thumbnail-$id'),
+              tooltip: '强制生成缩略图',
+              visualDensity: VisualDensity.compact,
+              onPressed: () =>
+                  BookmarkEditActions.regenerateThumbnail(context, state, bookmark),
+              icon: const Icon(Icons.image_outlined),
+            ),
+            IconButton(
+              key: ValueKey<String>('edit-delete-$id'),
+              tooltip: '删除',
+              visualDensity: VisualDensity.compact,
+              onPressed: () =>
+                  BookmarkEditActions.delete(context, state, bookmark),
+              icon: Icon(Icons.delete_outline, color: theme.colorScheme.error),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

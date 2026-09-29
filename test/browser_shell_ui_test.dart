@@ -329,7 +329,7 @@ void main() {
     // 回到编辑模式的那一行，而不是被弹回顶部、也不是变回方块墙。
     expect(find.byType(StartView), findsOneWidget);
     expect(state.homeEditMode, isTrue, reason: '返回后仍应是编辑模式');
-    expect(find.byKey(ValueKey<String>('edit-row-$id')), findsOneWidget);
+    expect(find.byKey(ValueKey<String>('edit-item-$id')), findsOneWidget);
     expect(
       wallOffset(tester),
       closeTo(before, 1),
