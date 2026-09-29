@@ -407,6 +407,49 @@ void main() {
     );
   });
 
+  testWidgets('墙是懒加载的：一百多个书签也只构建看得见的那几行', (tester) async {
+    // The wall used to be one giant Column: every bookmark — and in edit mode
+    // every one of its six buttons — was built and laid out on every scroll
+    // frame. A 150-bookmark wall took 1666ms to build and stuttered; as slivers
+    // only the visible rows exist.
+    late List<Bookmark> many;
+    await tester.runAsync(() async {
+      final lessons = await state.addCategory('课程');
+      many = <Bookmark>[
+        for (int i = 0; i < 120; i++)
+          await state.addBookmark(
+            url: 'https://site$i.test/page',
+            title: '书签 $i',
+            categoryId: lessons.id,
+          ),
+      ];
+    });
+
+    await pumpHome(tester);
+    final int tiles = find.byType(BookmarkTile).evaluate().length;
+    expect(tiles, greaterThan(0), reason: '看得见的那些当然要建出来');
+    expect(tiles, lessThan(60), reason: '120 个书签不该整面墙都建出来');
+    expect(find.text('书签 119', skipOffstage: false), findsNothing);
+
+    await tester.runAsync(() async => state.setHomeEditMode(true));
+    await tester.pumpAndSettle();
+    final int editItems = find
+        .byWidgetPredicate(
+          (Widget widget) =>
+              widget.key is ValueKey<String> &&
+              (widget.key! as ValueKey<String>).value.startsWith('edit-item-'),
+        )
+        .evaluate()
+        .length;
+    expect(editItems, greaterThan(0));
+    expect(editItems, lessThan(60), reason: '编辑模式同样只建看得见的那几行');
+    expect(
+      find.byKey(ValueKey<String>('edit-item-${many.last.id}'), skipOffstage: false),
+      findsNothing,
+      reason: '最后一条远在屏幕外，不该被构建',
+    );
+  });
+
   testWidgets('编辑模式下隐藏的书签排到所属分类最后，退出后又消失', (tester) async {
     await tester.runAsync(() async {
       final lessons = await state.addCategory('课程');

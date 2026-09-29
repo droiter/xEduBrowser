@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -25,7 +26,20 @@ const Key homeEditDoneKey = ValueKey<String>('home-edit-done');
 /// parental password. Hidden bookmarks are left out unless [editing] is on, so
 /// the parent can always bring one back.
 class BookmarkGrid extends StatelessWidget {
-  const BookmarkGrid({super.key, required this.onOpen, this.editing = false});
+  const BookmarkGrid({
+    super.key,
+    required this.onOpen,
+    this.editing = false,
+    required this.wallWidth,
+  });
+
+  /// Width the wall itself gets (the scroll view minus its padding).
+  ///
+  /// Handed in rather than measured with a [LayoutBuilder]: a sliver layout
+  /// builder sees the scroll offset in its constraints, so it rebuilds on every
+  /// scroll frame — which re-created the whole edit-mode row list per frame. The
+  /// outer box's constraints only change when the window does.
+  final double wallWidth;
 
   /// Opens a bookmark's URL through the browser's policy gate.
   final ValueChanged<String> onOpen;
@@ -99,17 +113,25 @@ class BookmarkGrid extends StatelessWidget {
     if (sections.isEmpty) {
       // Everything the wall could show is hidden. Say so instead of leaving a
       // blank page — the way back is the pencil.
-      return _HiddenWallNotice(
-        hidden: state.bookmarks.where(state.isHiddenOnHome).length,
+      return SliverToBoxAdapter(
+        child: _HiddenWallNotice(
+          hidden: state.bookmarks.where(state.isHiddenOnHome).length,
+        ),
       );
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (final (id, label, bookmarks, hiddenSection) in sections) ...[
+    // A **sliver group**, not a Column: the wall has to be laid out lazily. As
+    // one giant child it was re-laid out on every scroll frame, and edit mode
+    // (six buttons and a marker line per tile instead of one tile) turned that
+    // into stutter — measured on a 150-bookmark wall, a dozen scroll drags took
+    // 786ms in edit mode against 230ms on the child's wall, with **zero** widget
+    // rebuilds: the cost was layout, not rebuilding.
+    return SliverMainAxisGroup(
+      slivers: <Widget>[
+        for (final (id, label, bookmarks, hiddenSection) in sections)
           _CategorySection(
             state: state,
+            wallWidth: wallWidth,
             sectionId: id,
             label: label,
             bookmarks: bookmarks,
@@ -121,8 +143,6 @@ class BookmarkGrid extends StatelessWidget {
             onOpen: onOpen,
             editing: editing,
           ),
-          const SizedBox(height: 22),
-        ],
       ],
     );
   }
@@ -171,6 +191,7 @@ class _HiddenWallNotice extends StatelessWidget {
 class _CategorySection extends StatelessWidget {
   const _CategorySection({
     required this.state,
+    required this.wallWidth,
     required this.sectionId,
     required this.label,
     required this.bookmarks,
@@ -182,6 +203,9 @@ class _CategorySection extends StatelessWidget {
   });
 
   final AppState state;
+
+  /// Width the wall gets; see [BookmarkGrid.wallWidth].
+  final double wallWidth;
 
   /// Identifies the section for folding and for the test key; for 我的最爱 this
   /// is [BookmarkGrid.favoritesSectionId], not a real category id.
@@ -203,16 +227,20 @@ class _CategorySection extends StatelessWidget {
   final ValueChanged<String> onOpen;
   final bool editing;
 
+  /// The same numbers the child-facing grid hands to its delegate.
+  static const double _maxTileExtent = 190;
+  static const double _crossSpacing = 16;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final collapsed = state.isCategoryCollapsed(sectionId);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Tooltip(
-          message: collapsed ? '展开这一段' : '折叠这一段',
+    return SliverMainAxisGroup(
+      slivers: <Widget>[
+        SliverToBoxAdapter(
+          child: Tooltip(
+            message: collapsed ? '展开这一段' : '折叠这一段',
           child: InkWell(
             key: ValueKey<String>('bookmark-section-$sectionId'),
             onTap: () => state.toggleCategoryCollapsed(sectionId),
@@ -279,46 +307,90 @@ class _CategorySection extends StatelessWidget {
                 ],
               ),
             ),
+            ),
           ),
         ),
         // The tiles are not built at all while folded: a folded wall of a hundred
         // bookmarks costs nothing to lay out.
         if (!collapsed) ...[
-          const SizedBox(height: 10),
-          if (editing)
-            // Edit mode keeps the wall and adds the controls below each tile —
-            // the parent edits the page in front of them instead of being moved
-            // to another screen. Tapping the tile itself still opens the page:
-            // the buttons are for editing, not a replacement for visiting it.
-            _EditableWall(
-              state: state,
-              bookmarks: bookmarks,
-              onOpen: onOpen,
-            )
-          else
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 190,
-                mainAxisSpacing: 18,
-                crossAxisSpacing: 16,
-                // Taller than wide: the square thumbnail plus its caption below.
-                childAspectRatio: 0.76,
-              ),
-              itemCount: bookmarks.length,
-              itemBuilder: (context, index) {
-                final bookmark = bookmarks[index];
-                return BookmarkTile(
-                  bookmark: bookmark,
-                  onOpen: () => onOpen(bookmark.url),
-                  onReorderOnto: (dragged) => _dropOn(state, dragged, bookmark),
-                );
-              },
-            ),
+          const SliverToBoxAdapter(child: SizedBox(height: 10)),
+          if (editing) _editableRows() else _tileGrid(),
         ],
+        // The gap that used to live between sections in the old Column.
+        const SliverToBoxAdapter(child: SizedBox(height: 22)),
       ],
     );
+  }
+
+  /// Column count and tile width, worked out the way
+  /// [SliverGridDelegateWithMaxCrossAxisExtent] does it, so both modes agree on
+  /// the wall's shape.
+  static (int, double) _columns(double width) {
+    final int columns =
+        (width / (_maxTileExtent + _crossSpacing)).ceil().clamp(1, 64);
+    return (columns, (width - _crossSpacing * (columns - 1)) / columns);
+  }
+
+  /// The child's wall: the same lazy grid as before, now a real sliver so only
+  /// the visible tiles are laid out.
+  Widget _tileGrid() => SliverGrid.builder(
+        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: _maxTileExtent,
+          mainAxisSpacing: 18,
+          crossAxisSpacing: _crossSpacing,
+          // Taller than wide: the square thumbnail plus its caption below.
+          childAspectRatio: 0.76,
+        ),
+        itemCount: bookmarks.length,
+        itemBuilder: (BuildContext context, int index) {
+          final bookmark = bookmarks[index];
+          return BookmarkTile(
+            bookmark: bookmark,
+            onOpen: () => onOpen(bookmark.url),
+            onReorderOnto: (dragged) => _dropOn(state, dragged, bookmark),
+          );
+        },
+      );
+
+  /// Edit mode: the same wall, one row of tiles at a time.
+  ///
+  /// Edit-mode tiles carry buttons and an optional marker line, so they are not
+  /// all the same height and a [SliverGrid] cannot hold them; a row of fixed-width
+  /// tiles can, and [SliverList] keeps only the visible rows alive. Tapping a tile
+  /// still opens the page — the buttons are for editing, not a replacement for
+  /// visiting it.
+  Widget _editableRows() {
+    final (int columns, double tileWidth) = _columns(wallWidth);
+    final int rows = (bookmarks.length / columns).ceil();
+    return SliverList.builder(
+          itemCount: rows,
+          itemBuilder: (BuildContext context, int row) {
+            final int first = row * columns;
+            final int last = math.min(first + columns, bookmarks.length);
+            return Padding(
+              // The Wrap this replaced spaced the runs, not the last row.
+              padding: EdgeInsets.only(bottom: row == rows - 1 ? 0 : 18),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  for (int i = first; i < last; i++) ...[
+                    if (i > first) const SizedBox(width: _crossSpacing),
+                    SizedBox(
+                      key: ValueKey<String>('edit-item-${bookmarks[i].id}'),
+                      width: tileWidth,
+                      child: _EditableTile(
+                        state: state,
+                        bookmark: bookmarks[i],
+                        width: tileWidth,
+                        onOpen: () => onOpen(bookmarks[i].url),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            );
+          },
+        );
   }
 
   /// Dropping tile A onto tile B gives A B's slot, moving B along — the same
@@ -335,60 +407,6 @@ class _CategorySection extends StatelessWidget {
     } else {
       await state.moveBookmark(dragged, categoryId: target.categoryId, index: targetIndex);
     }
-  }
-}
-
-/// The wall while the home page is in edit mode: the very same tiles the child
-/// sees, each with its six management buttons wrapped underneath.
-///
-/// A [Wrap] rather than a [GridView]: the buttons need two rows under a tile,
-/// the marker line (★ 我的最爱 / 已隐藏) comes and goes, and a fixed cell aspect
-/// ratio would either overflow or leave a hole. The column width is computed the
-/// way [SliverGridDelegateWithMaxCrossAxisExtent] computes it, so entering edit
-/// mode does not reflow the wall.
-class _EditableWall extends StatelessWidget {
-  const _EditableWall({
-    required this.state,
-    required this.bookmarks,
-    required this.onOpen,
-  });
-
-  final AppState state;
-  final List<Bookmark> bookmarks;
-  final ValueChanged<String> onOpen;
-
-  /// The same numbers the child-facing grid uses (see [_CategorySection]).
-  static const double _maxTileExtent = 190;
-  static const double _crossSpacing = 16;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints constraints) {
-        final double width = constraints.maxWidth;
-        final int columns =
-            (width / (_maxTileExtent + _crossSpacing)).ceil().clamp(1, 64);
-        final double tileWidth =
-            (width - _crossSpacing * (columns - 1)) / columns;
-        return Wrap(
-          spacing: _crossSpacing,
-          runSpacing: 18,
-          children: [
-            for (final bookmark in bookmarks)
-              SizedBox(
-                key: ValueKey<String>('edit-item-${bookmark.id}'),
-                width: tileWidth,
-                child: _EditableTile(
-                  state: state,
-                  bookmark: bookmark,
-                  width: tileWidth,
-                  onOpen: () => onOpen(bookmark.url),
-                ),
-              ),
-          ],
-        );
-      },
-    );
   }
 }
 
@@ -455,64 +473,98 @@ class _EditableTile extends StatelessWidget {
         const SizedBox(height: 4),
         Wrap(
           alignment: WrapAlignment.center,
+          spacing: 2,
           children: [
-            IconButton(
+            _EditAction(
               key: ValueKey<String>('edit-favorite-$id'),
-              tooltip: bookmark.favorite ? '移出我的最爱' : '收藏到我的最爱',
-              visualDensity: VisualDensity.compact,
-              onPressed: () =>
+              label: bookmark.favorite ? '移出我的最爱' : '收藏到我的最爱',
+              icon: bookmark.favorite ? Icons.star : Icons.star_border,
+              color: bookmark.favorite ? const Color(0xFFF2B01E) : null,
+              onTap: () =>
                   BookmarkEditActions.toggleFavorite(context, state, bookmark),
-              icon: Icon(
-                bookmark.favorite ? Icons.star : Icons.star_border,
-                color: bookmark.favorite ? const Color(0xFFF2B01E) : null,
-              ),
             ),
-            IconButton(
+            _EditAction(
               key: ValueKey<String>('edit-hide-$id'),
-              tooltip: bookmark.hidden ? '取消隐藏' : '隐藏（首页不显示）',
-              visualDensity: VisualDensity.compact,
-              onPressed: () =>
+              label: bookmark.hidden ? '取消隐藏' : '隐藏（首页不显示）',
+              icon: bookmark.hidden
+                  ? Icons.visibility_off_outlined
+                  : Icons.visibility_outlined,
+              onTap: () =>
                   BookmarkEditActions.toggleHidden(context, state, bookmark),
-              icon: Icon(
-                bookmark.hidden
-                    ? Icons.visibility_off_outlined
-                    : Icons.visibility_outlined,
-              ),
             ),
-            IconButton(
+            _EditAction(
               key: ValueKey<String>('edit-rename-$id'),
-              tooltip: '更改标题',
-              visualDensity: VisualDensity.compact,
-              onPressed: () =>
-                  BookmarkEditActions.rename(context, state, bookmark),
-              icon: const Icon(Icons.drive_file_rename_outline),
+              label: '更改标题',
+              icon: Icons.drive_file_rename_outline,
+              onTap: () => BookmarkEditActions.rename(context, state, bookmark),
             ),
-            IconButton(
+            _EditAction(
               key: ValueKey<String>('edit-move-$id'),
-              tooltip: '更换分类',
-              visualDensity: VisualDensity.compact,
-              onPressed: () => BookmarkEditActions.move(context, state, bookmark),
-              icon: const Icon(Icons.drive_file_move_outline),
+              label: '更换分类',
+              icon: Icons.drive_file_move_outline,
+              onTap: () => BookmarkEditActions.move(context, state, bookmark),
             ),
-            IconButton(
+            _EditAction(
               key: ValueKey<String>('edit-thumbnail-$id'),
-              tooltip: '强制生成缩略图',
-              visualDensity: VisualDensity.compact,
-              onPressed: () =>
+              label: '强制生成缩略图',
+              icon: Icons.image_outlined,
+              onTap: () =>
                   BookmarkEditActions.regenerateThumbnail(context, state, bookmark),
-              icon: const Icon(Icons.image_outlined),
             ),
-            IconButton(
+            _EditAction(
               key: ValueKey<String>('edit-delete-$id'),
-              tooltip: '删除',
-              visualDensity: VisualDensity.compact,
-              onPressed: () =>
-                  BookmarkEditActions.delete(context, state, bookmark),
-              icon: Icon(Icons.delete_outline, color: theme.colorScheme.error),
+              label: '删除',
+              icon: Icons.delete_outline,
+              color: theme.colorScheme.error,
+              onTap: () => BookmarkEditActions.delete(context, state, bookmark),
             ),
           ],
         ),
       ],
+    );
+  }
+}
+
+/// One of the six actions under an edit-mode tile.
+///
+/// Deliberately **not** an [IconButton]: the wall is lazy, so scrolling builds and
+/// discards rows continuously, and a Material icon button is a small tree of its
+/// own (ink response, tooltip, hover/focus machinery, icon theme) that has to be
+/// created and torn down again for every one of them. Six per tile × a row of
+/// tiles × every row scrolled past is what made editing stutter. The label stays
+/// for screen readers (and for `uiautomator`); the edit-mode hint above the wall
+/// lists the six actions by name.
+class _EditAction extends StatelessWidget {
+  const _EditAction({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.onTap,
+    this.color,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  final Color? color;
+
+  /// Comfortably tappable with a finger, small enough that six fit per tile.
+  static const double _size = 38;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: label,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(_size / 2),
+        child: SizedBox(
+          width: _size,
+          height: _size,
+          child: Icon(icon, size: 20, color: color),
+        ),
+      ),
     );
   }
 }

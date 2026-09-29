@@ -84,13 +84,23 @@ class _StartViewState extends State<StartView> {
       return const Material(type: MaterialType.transparency, child: _EmptyHome());
     }
 
+    // A [CustomScrollView] rather than a [ListView]: the wall is a sliver group
+    // now, so only the tiles on screen are built and laid out. With the whole
+    // wall as one child of a list, every scroll frame re-laid out every bookmark —
+    // and in edit mode, where each tile carries six buttons, that stuttered.
     return Material(
       type: MaterialType.transparency,
-      child: ListView(
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          // Measured once here: the wall's own width, for the edit-mode rows.
+          final double wallWidth = (constraints.maxWidth - 56).clamp(160.0, 100000.0);
+          return CustomScrollView(
         controller: _controller,
-        padding: const EdgeInsets.fromLTRB(28, 16, 28, 40),
-        children: [
-          Row(
+        slivers: <Widget>[
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(28, 16, 28, 0),
+            sliver: SliverToBoxAdapter(
+              child: Row(
             children: [
               Text('书签', style: theme.textTheme.titleMedium),
               const Spacer(),
@@ -109,27 +119,36 @@ class _StartViewState extends State<StartView> {
                   icon: const Icon(Icons.edit_outlined),
                 ),
             ],
+            ),
+            ),
           ),
           if (state.homeEditMode)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Text(
-                '编辑模式：书签还是原来的方块，每个方块下面是它的操作按钮——'
-                '收藏到我的最爱、隐藏/显示、更改标题、更换分类、强制生成缩略图、删除。'
-                '隐藏的书签排在所属分类最后，隐藏的分类整段排在首页最后；'
-                '改完点「完成」退出。',
-                style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(28, 2, 28, 0),
+              sliver: SliverToBoxAdapter(
+                child: Text(
+                  '编辑模式：书签还是原来的方块，每个方块下面是它的操作按钮——'
+                  '收藏到我的最爱、隐藏/显示、更改标题、更换分类、强制生成缩略图、删除。'
+                  '隐藏的书签排在所属分类最后，隐藏的分类整段排在首页最后；'
+                  '改完点「完成」退出。',
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+                ),
               ),
             ),
-          const SizedBox(height: 14),
-          BookmarkGrid(
-            // 打开网页**不退出编辑模式**：家长常常是点开一条看看页面对不对，
-            // 回到首页还要接着改。而且编辑模式是行布局、非编辑模式是方块布局，
-            // 一进一出就回不到原来那一行了（滚动位置相同、看到的内容却变了）。
-            onOpen: widget.onNavigate,
-            editing: state.homeEditMode,
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(28, 14, 28, 40),
+            sliver: BookmarkGrid(
+              wallWidth: wallWidth,
+              // 打开网页**不退出编辑模式**：家长常常是点开一条看看页面对不对，
+              // 回到首页还要接着改。而且编辑模式是行布局、非编辑模式是方块布局，
+              // 一进一出就回不到原来那一行了（滚动位置相同、看到的内容却变了）。
+              onOpen: widget.onNavigate,
+              editing: state.homeEditMode,
+            ),
           ),
-        ],
+            ],
+          );
+        },
       ),
     );
   }
