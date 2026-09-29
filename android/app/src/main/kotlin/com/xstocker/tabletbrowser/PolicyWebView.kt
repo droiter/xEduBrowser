@@ -27,6 +27,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.webkit.ScriptHandler
 import com.xstocker.tabletbrowser.policy.PolicyConfig
 import com.xstocker.tabletbrowser.policy.PolicyDecision
 import com.xstocker.tabletbrowser.policy.PolicyEngine
@@ -51,6 +52,14 @@ data class WebViewSettings(
     val userAgent: String? = null,
     val textZoom: Int = 100,
     val blockPageHtml: String? = null,
+    /**
+     * Serve `fetch()` on `file:` pages over XHR (see [LocalFetchShim]).
+     *
+     * **Off by default**: the patch runs inside every local page, so it is
+     * something the operator opts into per device rather than a silent change
+     * to how pages behave.
+     */
+    val localFetchShim: Boolean = false,
 ) {
     companion object {
         @JvmStatic
@@ -67,6 +76,7 @@ data class WebViewSettings(
                 userAgent = map["userAgent"] as? String,
                 textZoom = (map["textZoom"] as? Number)?.toInt() ?: base.textZoom,
                 blockPageHtml = map["blockPageHtml"] as? String,
+                localFetchShim = map["localFetchShim"] as? Boolean ?: base.localFetchShim,
             )
         }
 
@@ -86,6 +96,7 @@ data class WebViewSettings(
                 textZoom = (patch["textZoom"] as? Number)?.toInt() ?: base.textZoom,
                 blockPageHtml = if (patch.containsKey("blockPageHtml")) patch["blockPageHtml"] as? String
                 else base.blockPageHtml,
+                localFetchShim = patch["localFetchShim"] as? Boolean ?: base.localFetchShim,
             )
         }
     }
@@ -255,8 +266,16 @@ class PolicyWebView(
      */
     private var blockPageUrl: String? = null
 
+    /**
+     * Keeps the document-start fetch patch installed while the setting is on, so
+     * switching it off removes the script again instead of leaving it behind for
+     * the rest of the view's life.
+     */
+    private var fetchShimHandler: ScriptHandler? = null
+
     init {
         webView.settings.applyPolicySettings(settings, defaultUserAgent)
+        applyFetchShim()
         webView.webViewClient = PolicyClient()
         webView.webChromeClient = PolicyChromeClient()
         webView.setDownloadListener(DownloadListener { url, userAgent, contentDisposition, mimeType, contentLength ->
@@ -274,6 +293,10 @@ class PolicyWebView(
         // instance is removed, so a newer view registered under the same tab id
         // is left alone.
         bridge.unregister(viewId, this)
+        // The handler belongs to this WebView, but dropping it here keeps the
+        // "installed or not" state honest for anything that outlives the view.
+        fetchShimHandler?.remove()
+        fetchShimHandler = null
         try {
             webView.stopLoading()
             webView.webChromeClient = null
@@ -344,6 +367,22 @@ class PolicyWebView(
     fun updateSettings(patch: Map<*, *>?) {
         settings = WebViewSettings.merge(settings, patch)
         if (!disposed) webView.settings.applyPolicySettings(settings, defaultUserAgent)
+        applyFetchShim()
+    }
+
+    /**
+     * Installs or removes [LocalFetchShim] to match the current settings.
+     *
+     * With JavaScript off the patch is pointless, so it is not installed at all.
+     */
+    private fun applyFetchShim() {
+        val wanted = settings.localFetchShim && settings.javaScript && !disposed
+        if (wanted) {
+            if (fetchShimHandler == null) fetchShimHandler = LocalFetchShim.install(webView)
+        } else {
+            fetchShimHandler?.remove()
+            fetchShimHandler = null
+        }
     }
 
     fun clearCache() {
@@ -499,6 +538,17 @@ class PolicyWebView(
             lastTitle = null
             emitPage("pageStarted", effectiveUrl)
             emitUrlChanged(effectiveUrl)
+            // Belt and braces for the fetch patch. The document-start injection
+            // is what makes it land before the page's own scripts, but whether the
+            // wildcard origin rule matches an opaque `file://` origin is up to the
+            // WebView — and a WebView without the document-start feature has no
+            // other route at all. So a `file://` navigation is patched here too;
+            // the script ignores a second run, so the cost is one round trip.
+            if (settings.localFetchShim && settings.javaScript &&
+                url != null && url.startsWith("file:")
+            ) {
+                view.evaluateJavascript(LocalFetchShim.SCRIPT, null)
+            }
         }
 
         override fun onPageFinished(view: WebView, url: String?) {

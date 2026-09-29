@@ -51,6 +51,7 @@ void main() {
         localServerPort: 9999,
         localServerEnabled: false,
         userAgent: 'TabletBrowser/1.0',
+        localFetchShim: true,
       );
       await store.saveSettings(settings);
       final loaded = await store.loadSettings();
@@ -59,6 +60,21 @@ void main() {
       expect(loaded.localServerPort, 9999);
       expect(loaded.localServerEnabled, isFalse);
       expect(loaded.userAgent, 'TabletBrowser/1.0');
+      expect(loaded.localFetchShim, isTrue);
+    });
+
+    test('the local fetch patch is off unless it was switched on', () async {
+      // Default: a device that never touched the switch keeps the old behaviour.
+      expect(const AppSettings().localFetchShim, isFalse);
+      // A settings file written before the switch existed must not turn it on.
+      final fromDisk = AppSettings.fromJson(<String, dynamic>{'javaScript': true});
+      expect(fromDisk.localFetchShim, isFalse);
+      // It is also part of the map the WebView receives.
+      expect(const AppSettings().toNativeSettings()['localFetchShim'], isFalse);
+      expect(
+        const AppSettings(localFetchShim: true).toNativeSettings()['localFetchShim'],
+        isTrue,
+      );
     });
 
     test('export/import round trips, and rejects non-objects', () {

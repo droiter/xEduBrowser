@@ -124,6 +124,33 @@ void main() {
     }
   }
 
+  testWidgets('本地 fetch 补丁开关：缺省关闭，打开后写进设置', (tester) async {
+    await pumpSettings(tester, openBookmarkManager: false);
+
+    final Finder patchSwitch = find.ancestor(
+      of: find.text('本地页面 fetch 兼容补丁'),
+      matching: find.byType(SwitchListTile),
+    );
+    await tester.scrollUntilVisible(
+      patchSwitch,
+      320,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+
+    // Off by default: the patch changes how every local page behaves.
+    expect(tester.widget<SwitchListTile>(patchSwitch).value, isFalse);
+    expect(state.settings.localFetchShim, isFalse);
+
+    await tester.tap(patchSwitch);
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<SwitchListTile>(patchSwitch).value, isTrue);
+    expect(state.settings.localFetchShim, isTrue);
+    // The switch lives in 网页引擎, so the WebView is told about it right away.
+    expect(state.settings.toNativeSettings()['localFetchShim'], isTrue);
+  });
+
   testWidgets('书签管理排在设置最后，点进去是单独一页', (tester) async {
     await pumpSettings(tester, openBookmarkManager: false);
 

@@ -51,6 +51,9 @@ kotlin {
 }
 
 dependencies {
+    // Document-start script injection (`WebViewCompat.addDocumentStartJavaScript`),
+    // used by the opt-in local fetch shim (see LocalFetchShim.kt).
+    implementation("androidx.webkit:webkit:1.17.1")
     testImplementation("junit:junit:4.13.2")
     // android.jar only ships org.json stubs on the unit-test classpath, so the
     // real implementation is added explicitly.

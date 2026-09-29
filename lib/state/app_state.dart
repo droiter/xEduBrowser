@@ -66,6 +66,18 @@ class AppSettings {
   /// while the child has been idle (see `ThumbnailBackfill`).
   final bool backfillThumbnails;
 
+  /// Serve `fetch()` to local pages over XHR instead of letting it fail.
+  ///
+  /// Chromium refuses `fetch` for `file:` URLs (XHR on the same file is fine),
+  /// so a local page that loads its own data with `fetch` renders nothing. With
+  /// this on, the WebView gets a document-start script that rewrites `file:`
+  /// fetches to XHR and hands every other URL to the native implementation.
+  ///
+  /// **Off by default**: the patch runs inside every local page and cannot
+  /// reproduce every corner of `fetch` (streaming bodies, `Response.body`), so a
+  /// page that relies on those would notice. Turn it on for a page that needs it.
+  final bool localFetchShim;
+
   const AppSettings({
     this.javaScript = true,
     this.domStorage = true,
@@ -87,6 +99,7 @@ class AppSettings {
     this.parentalGateProtectRules = true,
     this.bookmarkWhitelistByDefault = true,
     this.backfillThumbnails = true,
+    this.localFetchShim = false,
   });
 
   /// True once a parent password has been configured. While false, the gate
@@ -116,6 +129,7 @@ class AppSettings {
     bool? parentalGateProtectRules,
     bool? bookmarkWhitelistByDefault,
     bool? backfillThumbnails,
+    bool? localFetchShim,
   }) =>
       AppSettings(
         javaScript: javaScript ?? this.javaScript,
@@ -140,6 +154,7 @@ class AppSettings {
         bookmarkWhitelistByDefault:
             bookmarkWhitelistByDefault ?? this.bookmarkWhitelistByDefault,
         backfillThumbnails: backfillThumbnails ?? this.backfillThumbnails,
+        localFetchShim: localFetchShim ?? this.localFetchShim,
       );
 
   Map<String, dynamic> toJson() => {
@@ -164,6 +179,7 @@ class AppSettings {
         'parentalGateProtectRules': parentalGateProtectRules,
         'bookmarkWhitelistByDefault': bookmarkWhitelistByDefault,
         'backfillThumbnails': backfillThumbnails,
+        'localFetchShim': localFetchShim,
       };
 
   /// The subset the native side consumes for the WebView.
@@ -175,6 +191,7 @@ class AppSettings {
         'mediaAutoplay': mediaAutoplay,
         'userAgent': userAgent,
         'textZoom': textZoom,
+        'localFetchShim': localFetchShim,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) => AppSettings(
@@ -203,6 +220,9 @@ class AppSettings {
         bookmarkWhitelistByDefault:
             json['bookmarkWhitelistByDefault'] as bool? ?? true,
         backfillThumbnails: json['backfillThumbnails'] as bool? ?? true,
+        // A missing key means the setting did not exist when this file was
+        // written; the patch is opt-in, so it stays off.
+        localFetchShim: json['localFetchShim'] as bool? ?? false,
       );
 }
 

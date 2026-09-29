@@ -54,7 +54,8 @@ conflictWhitelistWins, containmentBudgetExceeded`.
   "viewId": 1,
   "settings": { "javaScript": true, "domStorage": true, "fileAccess": true,
                 "allowFileUrlCrossAccess": true, "mediaAutoplay": false,
-                "userAgent": null, "textZoom": 100, "blockPageHtml": "<html>..." },
+                "userAgent": null, "textZoom": 100, "blockPageHtml": "<html>...",
+                "localFetchShim": false },
   "policy": { "... PolicyConfig.toJson() ...",
               "localServer": { "port": 8787, "rootPath": "/data/user/0/.../files/site" } }
 }
@@ -63,6 +64,14 @@ conflictWhitelistWins, containmentBudgetExceeded`.
 `settings.blockPageHtml` is a template rendered by native code for blocked
 navigations. Placeholders: `{{URL}}`, `{{REASON}}`, `{{MATCHED}}`, `{{TIME}}`.
 Native must HTML-escape substituted values.
+
+`settings.localFetchShim` is **opt-in and off by default**. When true (and
+JavaScript is on) native injects a small script **before the page's own scripts
+run** — `WebViewCompat.addDocumentStartJavaScript` where the installed WebView
+supports it, otherwise from `onPageStarted` as a best-effort fallback. The script
+re-implements `fetch` over `XMLHttpRequest` for `file:` URLs only (Chromium
+refuses `fetch` for those while XHR succeeds) and passes every other URL to the
+native `fetch`. Switching the setting off must remove the script again.
 
 ### Dart -> native methods on `tablet_browser/commands`
 

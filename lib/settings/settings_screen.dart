@@ -257,6 +257,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SizedBox(height: 8),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
+          value: settings.localFetchShim,
+          onChanged: (bool value) =>
+              _apply((AppSettings current) => current.copyWith(localFetchShim: value)),
+          title: const Text('本地页面 fetch 兼容补丁'),
+          subtitle: const Text(
+            '本地 file:// 页面里的 fetch() 会被浏览器直接拒绝（同一个文件用 XHR 却可以），'
+            '这类页面于是只剩空白。开启后 App 会在页面脚本运行前把 fetch 改成走 XHR，'
+            '只影响 file:// 地址，http(s) 原样透传。缺省关闭：补丁跑在每个本地页面里，'
+            '依赖流式响应（Response.body / ReadableStream）的页面会有差异。',
+          ),
+          isThreeLine: true,
+        ),
+        const SizedBox(height: 8),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
           value: settings.mediaAutoplay,
           onChanged: (bool value) => _apply((AppSettings current) => current.copyWith(mediaAutoplay: value)),
           title: const Text('媒体自动播放'),
