@@ -139,11 +139,22 @@ internal fun WebSettings.applyPolicySettings(snapshot: WebViewSettings, defaultU
  * events. It is deliberately limited to local pages (`file://` and the built-in
  * loopback server), so ordinary web pages keep normal mouse behaviour such as
  * text selection.
+ *
+ * Replaying the gesture as touch means the **button half** of the same click has
+ * to be dropped, or the page sees two clicks — see `onGenericMotionEvent`.
  */
 private class TouchCompatWebView(context: Context) : WebView(context) {
 
     /** Set on ACTION_DOWN, so the whole gesture is judged by the page it began on. */
     private var convertGesture = false
+
+    /**
+     * Decides which half of a mouse click's **button** events to drop.
+     *
+     * Android reports one mouse click on two paths, and only one of them is
+     * replayed as touch below.
+     */
+    private val primaryButton = PrimaryButtonFilter()
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!MouseDragBridge.isMouse(event)) {
@@ -158,6 +169,31 @@ private class TouchCompatWebView(context: Context) : WebView(context) {
         }
         val converted = if (convertGesture) MouseDragBridge.toTouch(event) else null
         return super.onTouchEvent(converted ?: event)
+    }
+
+    /**
+     * Drops the **button half** of a primary-button click on local pages.
+     *
+     * One physical click reaches the WebView twice: as `ACTION_DOWN`/`ACTION_UP`
+     * with `SOURCE_MOUSE` on [onTouchEvent] — replayed as a touch, so the page gets
+     * its tap — **and** as `ACTION_BUTTON_PRESS`/`ACTION_BUTTON_RELEASE` here, which
+     * Chromium turns into a mouse click of its own. Left alone, Chromium folds the
+     * two halves into a single click; but the touch twin has already produced a
+     * click, so every click becomes two and a page that turns one page per click
+     * turns two. A finger sends no button events at all, which is why only a mouse
+     * (or the keyboard cover's touchpad) shows it.
+     *
+     * Secondary buttons are left alone — nothing replays them as touch — and so are
+     * pages whose input we do not touch at all.
+     */
+    override fun onGenericMotionEvent(event: MotionEvent): Boolean {
+        if (MouseDragBridge.isMouse(event) &&
+            MouseDragBridge.isLocalPage(url) &&
+            primaryButton.shouldSwallow(event.actionMasked, event.buttonState)
+        ) {
+            return true
+        }
+        return super.onGenericMotionEvent(event)
     }
 
     private companion object {
@@ -208,6 +244,46 @@ internal object MouseDragBridge {
         )
         touch.setSource(InputDevice.SOURCE_TOUCHSCREEN)
         return touch
+    }
+}
+
+/**
+ * Which half of a mouse click's button events must not reach the WebView.
+ *
+ * Android reports one physical click twice: `ACTION_DOWN`/`ACTION_UP` with
+ * `SOURCE_MOUSE` (replayed as touch by [TouchCompatWebView.onTouchEvent], so the
+ * page gets its tap) **and** `ACTION_BUTTON_PRESS`/`ACTION_BUTTON_RELEASE`, which
+ * Chromium turns into a mouse click of its own. Chromium folds the two halves
+ * into a single click when both arrive as mouse events, but the touch twin has
+ * already produced one — so without this the page sees **two** clicks and a page
+ * that turns one page per click turns two. A finger sends no button events at
+ * all, which is why only a mouse or a touchpad shows it.
+ *
+ * Kept as a plain object (no [MotionEvent]) so the state machine is unit
+ * testable: the press is swallowed and remembered, and the release that pairs
+ * with it is swallowed too. Anything else — secondary buttons, a release whose
+ * press we did not see — is passed through untouched.
+ */
+internal class PrimaryButtonFilter {
+
+    /** True while the press we swallowed is still waiting for its release. */
+    private var pendingRelease = false
+
+    /** Whether this button event has to be dropped instead of dispatched. */
+    fun shouldSwallow(actionMasked: Int, buttonState: Int): Boolean {
+        when (actionMasked) {
+            MotionEvent.ACTION_BUTTON_PRESS -> {
+                pendingRelease =
+                    (buttonState and MotionEvent.BUTTON_PRIMARY) != 0
+                return pendingRelease
+            }
+            MotionEvent.ACTION_BUTTON_RELEASE -> {
+                if (!pendingRelease) return false
+                pendingRelease = false
+                return true
+            }
+        }
+        return false
     }
 }
 

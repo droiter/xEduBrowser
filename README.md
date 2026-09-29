@@ -325,12 +325,18 @@ tool/release.sh --bump minor           # 只构建打包，不上传
 > `files/thumb/*.jpg`（走 JDK 自带的 ImageIO，不需要 PIL / ImageMagick；已存在的不会覆盖），
 > 再重开这本书就不转了。
 
-> **已知限制：鼠标拖拽翻不了本地电子书**。Flip PDF 这类电子书的翻页拖动只绑了
-> `touchstart/touchmove`（没有鼠标分支），而 Flutter 的 AndroidView 目前只把**触摸**与**滚轮**
-> 转发给平台视图，**鼠标的按下/拖动/抬起根本到不了 WebView**（用 `dispatchTouchEvent` 日志实测：
-> 触摸有、鼠标一条都没有）。所以「按住鼠标左键拖动＝用手指滑动」这个效果做不了：
-> 原生侧收不到事件，只能以后在 Dart 层接住鼠标手势再用 `evaluateJavascript` 注入合成触摸事件。
-> 滚轮、点击、以及直接用手指拖拽都正常。
+> **鼠标在本地电子书上的行为**（Flip PDF 这类只绑 `touchstart/touchmove` 的翻页书）：
+> 平台视图对**本地页面**（`file://` 与本机回环地址）会把鼠标手势改写成触摸手势，于是
+> 「按住左键拖动＝用手指滑动」可以翻页，点击也照常。改写只发生在本地页面，普通网页仍是
+> 标准鼠标行为（可选文字等）。
+>
+> 这里有个**成对处理**必须留着：Android 会把一次鼠标左键上报**两遍**——`onTouchEvent` 的
+> `ACTION_DOWN/UP`（被改写成触摸，页面得到一次 tap）**和** `onGenericMotionEvent` 的
+> `ACTION_BUTTON_PRESS/RELEASE`（Chromium 会再合成一次鼠标 click）。两者都放行时，页面就
+> 收到**两次 click**：一次点击翻两页，左右热点与底部「上一页/下一页」都会翻两页。所以
+> [PrimaryButtonFilter](android/app/src/main/kotlin/com/xstocker/tabletbrowser/PolicyWebView.kt)
+> 会把左键的 `BUTTON_PRESS/RELEASE` 吞掉（只吞左键、只吞本地页面），右键/中键与普通网页不受影响。
+> **手指与 S Pen 没有 button 事件**，所以只有鼠标/触控板会撞上这个问题。
 
 > **页面加载看门狗**：点开书签后若 4 秒内页面没有任何进展，应用会**自动重发一次加载并强制重新
 > 布局**（此前这种“空白页 + 一直转圈、切一下标签页才出来”的情况只能手动翻页解决），最多重试两次；
