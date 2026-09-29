@@ -103,6 +103,31 @@ void main() {
       expect(plan.truncated, isTrue);
     });
 
+    test('the default cap takes a whole archive, well past the old 200', () async {
+      final flat = Directory.systemTemp.createTempSync('tb_import_flat');
+      addTearDown(() {
+        if (flat.existsSync()) flat.deleteSync(recursive: true);
+      });
+      // 300 pages: past the old 200 cap, and past the 64-file slices the scan
+      // is read in, so the yielded walk has to keep every page and its order.
+      for (var i = 0; i < 300; i++) {
+        writeHtml(
+          '${flat.path}/page${i.toString().padLeft(3, '0')}.html',
+          title: '第 $i 页',
+        );
+      }
+
+      final plan = await BookmarkImporter.scan(flat.path);
+
+      expect(plan.rootLevelHtmlCount, 300);
+      expect(plan.fileCount, 300);
+      expect(plan.truncated, isFalse);
+      expect(plan.candidates.first.filePath.endsWith('page000.html'), isTrue);
+      expect(plan.candidates.last.filePath.endsWith('page299.html'), isTrue);
+      expect(plan.candidates.first.title, '第 0 页');
+      expect(plan.candidates.last.title, '第 299 页');
+    });
+
     test('a missing directory is not an error', () async {
       final plan = await BookmarkImporter.scan('${root.path}/does-not-exist');
       expect(plan.isEmpty, isTrue);

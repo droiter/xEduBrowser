@@ -175,7 +175,20 @@ abstract final class BookmarkImporter {
   static const Set<String> pageExtensions = {'html', 'htm', 'xhtml'};
 
   /// Default cap, so pointing at a huge tree cannot freeze the app.
-  static const int defaultMaxFiles = 200;
+  ///
+  /// A whole courseware or school archive can easily hold thousands of pages,
+  /// so the cap is set high enough not to bite in practice. What actually keeps
+  /// the scan responsive is not this number but [_yieldEvery]: `<title>` is read
+  /// synchronously, so a folder of thousands of pages is walked in slices with
+  /// the event loop handed back in between.
+  static const int defaultMaxFiles = 10000;
+
+  /// How many pages are read between two trips back to the event loop.
+  ///
+  /// Without this, reading every `<title>` of a big directory in one go would
+  /// block the UI isolate and the dialog would not even paint its
+  /// 「正在扫描目录…」 state.
+  static const int _yieldEvery = 64;
 
   /// Bytes read from each file when looking for `<title>`.
   static const int _titleReadBytes = 16384;
@@ -215,18 +228,14 @@ abstract final class BookmarkImporter {
     ]..sort((a, b) => a.path.toLowerCase().compareTo(b.path.toLowerCase()));
     final rootLevelHtml = rootFiles.length;
 
-    final candidates = <ImportCandidate>[
-      for (final file in rootFiles)
-        ImportCandidate(
-          filePath: file.path,
-          url: _urlFor(file.path, localServerBase, localServerRoot),
-          titles: LocalPageTitles.forPath(file.path),
-          subdirectory: '',
-        ),
-    ];
-    if (candidates.length > maxFiles) {
-      candidates.removeRange(maxFiles, candidates.length);
-    }
+    // Only the pages that fit under the cap are read at all: reading `<title>`
+    // is a synchronous disk read, so files past the cap must not be touched.
+    final candidates = await _candidatesFor(
+      rootFiles.take(maxFiles),
+      subdirectory: '',
+      localServerBase: localServerBase,
+      localServerRoot: localServerRoot,
+    );
     var truncated = candidates.length >= maxFiles;
 
     for (final name in subdirectoryNames) {
@@ -294,15 +303,40 @@ abstract final class BookmarkImporter {
 
     await walk(directory);
 
-    return [
-      for (final page in pages)
-        ImportCandidate(
-          filePath: page.path,
-          url: _urlFor(page.path, localServerBase, localServerRoot),
-          titles: LocalPageTitles.forPath(page.path),
-          subdirectory: subdirectory,
-        ),
-    ];
+    return _candidatesFor(
+      pages,
+      subdirectory: subdirectory,
+      localServerBase: localServerBase,
+      localServerRoot: localServerRoot,
+    );
+  }
+
+  /// Builds the candidates for [files], in the order given.
+  ///
+  /// Reading a page's `<title>` is a synchronous disk read, so a folder holding
+  /// thousands of pages would otherwise block the UI isolate for the whole
+  /// scan. Handing the event loop back every [_yieldEvery] files keeps the app
+  /// (and the dialog's 「正在扫描目录…」 state) alive without changing the order
+  /// the pages are imported in.
+  static Future<List<ImportCandidate>> _candidatesFor(
+    Iterable<File> files, {
+    required String subdirectory,
+    required String? localServerBase,
+    required String? localServerRoot,
+  }) async {
+    final out = <ImportCandidate>[];
+    for (final file in files) {
+      out.add(ImportCandidate(
+        filePath: file.path,
+        url: _urlFor(file.path, localServerBase, localServerRoot),
+        titles: LocalPageTitles.forPath(file.path),
+        subdirectory: subdirectory,
+      ));
+      if (out.length % _yieldEvery == 0) {
+        await Future<void>.delayed(Duration.zero);
+      }
+    }
+    return out;
   }
 
   /// A file inside the served root is addressed over loopback so dynamic pages
