@@ -505,4 +505,39 @@ void main() {
       isTrue,
     );
   });
+
+  testWidgets('网页脚本报错写进诊断日志（白屏页面的唯一线索）', (tester) async {
+    await pumpShell(tester);
+
+    // A page that dies inside its own <script> still reports pageFinished: the
+    // console error is the only thing that says why nothing was drawn.
+    final Map<String, dynamic> consoleError = <String, dynamic>{
+      'type': 'consoleMessage',
+      'viewId': 1,
+      'message':
+          "Uncaught TypeError: Cannot read properties of null (reading 'assetUrl')",
+      'level': 'ERROR',
+      'source':
+          'file:///sdcard/egame/071_%E7%88%AC%E8%A1%8C%E5%8A%A8%E7%89%A9/go/05/1c/dd9fad2e8ee601b4bb764205bfc89132.js',
+      'line': 1,
+    };
+    await sendNativeEvent(tester, consoleError);
+
+    expect(
+      state.appLog.any(
+        (entry) =>
+            entry.tag == 'console' &&
+            entry.level == LogLevel.error &&
+            entry.message.contains("reading 'assetUrl'") &&
+            entry.message.contains('dd9fad2e8ee601b4bb764205bfc89132.js:1'),
+      ),
+      isTrue,
+      reason: '日志要能说明是哪个文件哪一行报的错',
+    );
+
+    // A page stuck in a failing render loop repeats the same error constantly.
+    final int entries = state.appLog.length;
+    await sendNativeEvent(tester, consoleError);
+    expect(state.appLog.length, entries, reason: '同一条报错不重复记录');
+  });
 }

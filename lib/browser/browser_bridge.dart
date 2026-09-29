@@ -171,6 +171,16 @@ class BrowserEvent {
   final bool canGoForward;
   final String message;
   final int errorCode;
+
+  /// Console message level (`ERROR`, `WARNING`, …) for `consoleMessage` events.
+  final String level;
+
+  /// File a `consoleMessage` came from, as the WebView reported it.
+  final String source;
+
+  /// Line inside [source], or 0 when the platform did not say.
+  final int line;
+
   final Map<String, dynamic> raw;
 
   const BrowserEvent({
@@ -187,6 +197,9 @@ class BrowserEvent {
     this.canGoForward = false,
     this.message = '',
     this.errorCode = 0,
+    this.level = '',
+    this.source = '',
+    this.line = 0,
     this.raw = const {},
   });
 
@@ -204,6 +217,9 @@ class BrowserEvent {
         canGoForward: map['canGoForward'] as bool? ?? false,
         message: map['message'] as String? ?? map['description'] as String? ?? '',
         errorCode: (map['code'] as num?)?.toInt() ?? 0,
+        level: map['level'] as String? ?? '',
+        source: map['source'] as String? ?? '',
+        line: (map['line'] as num?)?.toInt() ?? 0,
         raw: map,
       );
 }

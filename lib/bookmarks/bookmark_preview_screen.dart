@@ -167,6 +167,18 @@ class _BookmarkPreviewScreenState extends State<BookmarkPreviewScreen> {
       case 'newWindow':
         // Stay in the preview instead of opening a tab behind the settings.
         if (event.url.isNotEmpty) _open(event.url);
+      case 'consoleMessage':
+        // The preview can come up blank for the same reason a tab can, and this
+        // is the only trace of it (see AppState.logPageConsoleError).
+        if (mounted) {
+          AppScope.read(context).logPageConsoleError(
+                viewId: event.viewId,
+                message: event.message,
+                level: event.level,
+                source: event.source,
+                line: event.line,
+              );
+        }
       case 'pageError':
         setState(() => _loading = false);
         if (event.message.isNotEmpty) {

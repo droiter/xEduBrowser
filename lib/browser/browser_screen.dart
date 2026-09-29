@@ -484,6 +484,17 @@ class _BrowserScreenState extends State<BrowserScreen> {
           state.logEvent('browser', '页面请求新窗口：${event.url}');
           _addTab(url: event.url);
         }
+      case 'consoleMessage':
+        // A page that dies inside its own script still reports a finished load,
+        // so this is the only report of it — and the only clue that explains a
+        // page which rendered nothing. Level filtering lives in AppState.
+        state.logPageConsoleError(
+          viewId: event.viewId,
+          message: event.message,
+          level: event.level,
+          source: event.source,
+          line: event.line,
+        );
       case 'pageError':
         state.logEvent(
           'browser',

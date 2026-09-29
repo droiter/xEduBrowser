@@ -99,6 +99,71 @@ void main() {
       expect(state.appLog, isEmpty);
       expect(state.log, isNotEmpty);
     });
+
+    test('a page console error keeps its source and line', () {
+      state.logPageConsoleError(
+        viewId: 3,
+        message:
+            "Uncaught TypeError: Cannot read properties of null (reading 'assetUrl')",
+        level: 'ERROR',
+        source:
+            'file:///sdcard/egame/071_%E7%88%AC%E8%A1%8C%E5%8A%A8%E7%89%A9/go/05/1c/dd9fad2e8ee601b4bb764205bfc89132.js',
+        line: 1,
+      );
+
+      final entry = state.appLog.single;
+      expect(entry.tag, 'console');
+      expect(entry.level, LogLevel.error);
+      expect(entry.message, contains('网页脚本报错（视图 3）'));
+      expect(entry.message, contains('reading'));
+      // Only the file name survives: the whole file:// path would bury the line.
+      expect(
+        entry.message,
+        contains('（dd9fad2e8ee601b4bb764205bfc89132.js:1）'),
+      );
+      expect(entry.message, isNot(contains('/sdcard/')));
+    });
+
+    test('page console noise is filtered and repeats are dropped', () {
+      // Anything below ERROR is the bulk of a page's console output.
+      state.logPageConsoleError(
+        viewId: 1,
+        message: 'a warning',
+        level: 'WARNING',
+      );
+      state.logPageConsoleError(viewId: 1, message: '   ', level: 'ERROR');
+      expect(state.appLog, isEmpty);
+
+      void boom({String source = 'x.js'}) => state.logPageConsoleError(
+            viewId: 1,
+            message: 'boom',
+            level: 'ERROR',
+            source: source,
+            line: 3,
+          );
+
+      boom();
+      boom();
+      boom(source: 'y.js'); // a different file is a different error
+      expect(state.appLog, hasLength(2), reason: '同一处重复报错只记一次');
+
+      // Clearing the log also forgets what was de-duplicated.
+      state.clearAppLog();
+      boom();
+      expect(state.appLog, hasLength(1));
+    });
+
+    test('a long console message is clipped', () {
+      state.logPageConsoleError(
+        viewId: 1,
+        message: 'x' * 400,
+        level: 'ERROR',
+      );
+
+      final message = state.appLog.single.message;
+      expect(message.length, lessThan(400));
+      expect(message, contains('…'));
+    });
   });
 
   group('writing the log file', () {

@@ -105,7 +105,7 @@ Each event is a JSON map with a `type` and `viewId`:
 | `newWindow` | `url` — Dart opens a new tab |
 | `pageError` | `code`, `description`, `url` |
 | `downloadRequested` | `url`, `userAgent`, `contentDisposition`, `mimeType`, `contentLength` |
-| `consoleMessage` | `message`, `level` |
+| `consoleMessage` | `message`, `level`, `source`, `line` — the only event that carries a page's uncaught JS error: such a page still reports a successful `pageFinished` |
 
 ### Enforcement points in Kotlin
 

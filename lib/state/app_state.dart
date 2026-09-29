@@ -378,6 +378,19 @@ class AppState extends ChangeNotifier {
   final List<AppLogEntry> _appLog = [];
   static const int _appLogLimit = 800;
 
+  /// Page console errors already logged, keyed by source + message, so a page
+  /// throwing inside its own render loop cannot push everything else out.
+  final Map<String, DateTime> _recentConsoleErrors = {};
+
+  /// How many distinct page errors are remembered for de-duplication.
+  static const int _consoleErrorMemory = 40;
+
+  /// A repeat of the same page error inside this window is dropped.
+  static const Duration _consoleErrorWindow = Duration(seconds: 10);
+
+  /// Longest console message kept in the log; the rest is elided.
+  static const int _consoleMessageLimit = 300;
+
   /// Home page edit mode: tiles show their action buttons. Kept here (not in the
   /// widget) so it survives the shell rebuilding the start page, and so the log
   /// can record who turned it on.
@@ -1531,9 +1544,72 @@ class AppState extends ChangeNotifier {
 
   void clearAppLog() {
     _appLog.clear();
+    // Forget the de-duplication memory too: after a clear, the next occurrence
+    // of an error the user just wiped should be written again.
+    _recentConsoleErrors.clear();
     _logNotifyTimer?.cancel();
     _logNotifyTimer = null;
     notifyListeners();
+  }
+
+  /// Records a page's console error in the diagnostic log.
+  ///
+  /// A page that dies inside its own `<script>` still *finishes loading*: no
+  /// `pageError` reaches the shell, the tab simply stays blank. Its console
+  /// message is then the only trace of why — which is what makes a page like
+  /// 071 (a `null` in its own config that the game engine dereferences)
+  /// diagnosable from 访问日志 instead of through adb.
+  ///
+  /// Only [level] `ERROR` is kept: pages emit plenty of noise at lower levels
+  /// and this log is read by a parent. Repeats of the same message from the same
+  /// source are dropped for [_consoleErrorWindow], and the message is clipped to
+  /// [_consoleMessageLimit] characters.
+  void logPageConsoleError({
+    required int viewId,
+    required String message,
+    String level = '',
+    String source = '',
+    int line = 0,
+  }) {
+    if (level.trim().toUpperCase() != 'ERROR') return;
+    final text = message.trim();
+    if (text.isEmpty) return;
+
+    final where = _consoleErrorSource(source, line);
+    final key = '$where\u0000$text';
+    final now = DateTime.now();
+    final previous = _recentConsoleErrors[key];
+    if (previous != null && now.difference(previous) < _consoleErrorWindow) {
+      return;
+    }
+    _recentConsoleErrors[key] = now;
+    if (_recentConsoleErrors.length > _consoleErrorMemory) {
+      final oldest = _recentConsoleErrors.entries
+          .reduce((a, b) => a.value.isAfter(b.value) ? b : a)
+          .key;
+      _recentConsoleErrors.remove(oldest);
+    }
+
+    final clipped = text.length <= _consoleMessageLimit
+        ? text
+        : '${text.substring(0, _consoleMessageLimit - 1)}…';
+    logEvent(
+      'console',
+      '网页脚本报错（视图 $viewId）：$clipped${where.isEmpty ? '' : ' $where'}',
+      level: LogLevel.error,
+    );
+  }
+
+  /// `（文件名.js:12）` for a console error, or an empty string when the page
+  /// did not say where it came from.
+  static String _consoleErrorSource(String source, int line) {
+    final trimmed = source.trim();
+    if (trimmed.isEmpty) return '';
+    final withoutQuery = trimmed.split('?').first;
+    final slash = withoutQuery.lastIndexOf('/');
+    final name = slash < 0 ? withoutQuery : withoutQuery.substring(slash + 1);
+    if (name.isEmpty) return '';
+    return line > 0 ? '（$name:$line）' : '（$name）';
   }
 
   /// Everything the two logs hold, as one text file.

@@ -562,6 +562,15 @@ class PolicyWebView(
             bridge.emit(mapOf("type" to "titleChanged", "viewId" to viewId, "title" to value))
         }
 
+        /**
+         * Every page console message, source and line included.
+         *
+         * A page that dies inside its own `<script>` still finishes loading, so
+         * `onReceivedError` never fires and the shell sees a successful load of
+         * a document that rendered nothing. The console message is then the only
+         * trace of *why* — which is what lets 访问日志 explain a blank page
+         * without adb. Source and line are what make it actionable.
+         */
         override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
             bridge.emit(
                 mapOf(
@@ -569,6 +578,8 @@ class PolicyWebView(
                     "viewId" to viewId,
                     "message" to consoleMessage.message(),
                     "level" to consoleMessage.messageLevel().name,
+                    "source" to consoleMessage.sourceId(),
+                    "line" to consoleMessage.lineNumber(),
                 )
             )
             return true
