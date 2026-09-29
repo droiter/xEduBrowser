@@ -14,6 +14,9 @@ const Key homeEditModeButtonKey = ValueKey<String>('home-edit-mode');
 /// Test hook for the 完成 button shown while the home page is in edit mode.
 const Key homeEditDoneKey = ValueKey<String>('home-edit-done');
 
+/// Test hook for the 回到顶部 button, shown next to 完成 in edit mode.
+const Key homeEditTopKey = ValueKey<String>('home-edit-top');
+
 /// The home page bookmark wall: one section per category, each a grid of square
 /// tiles with the title underneath, with the starred 我的最爱 section pinned on
 /// top.
@@ -41,8 +44,11 @@ class BookmarkGrid extends StatelessWidget {
   /// outer box's constraints only change when the window does.
   final double wallWidth;
 
-  /// Opens a bookmark's URL through the browser's policy gate.
-  final ValueChanged<String> onOpen;
+  /// Opens a bookmark through the browser's policy gate.
+  ///
+  /// The whole bookmark, not just its URL: the wall has to be able to say no
+  /// (防反复看) and to record that it was watched.
+  final ValueChanged<Bookmark> onOpen;
 
   /// Edit mode: the wall keeps its shape — the very same tiles — and each one
   /// grows the six management buttons (★ 我的最爱 / 隐藏·显示 / 更改标题 /
@@ -224,7 +230,7 @@ class _CategorySection extends StatelessWidget {
   /// Hides/shows the category; null for the pinned 我的最爱 section.
   final VoidCallback? onToggleHidden;
 
-  final ValueChanged<String> onOpen;
+  final ValueChanged<Bookmark> onOpen;
   final bool editing;
 
   /// The same numbers the child-facing grid hands to its delegate.
@@ -346,7 +352,7 @@ class _CategorySection extends StatelessWidget {
           final bookmark = bookmarks[index];
           return BookmarkTile(
             bookmark: bookmark,
-            onOpen: () => onOpen(bookmark.url),
+            onOpen: () => onOpen(bookmark),
             onReorderOnto: (dragged) => _dropOn(state, dragged, bookmark),
           );
         },
@@ -382,7 +388,7 @@ class _CategorySection extends StatelessWidget {
                         state: state,
                         bookmark: bookmarks[i],
                         width: tileWidth,
-                        onOpen: () => onOpen(bookmarks[i].url),
+                        onOpen: () => onOpen(bookmarks[i]),
                       ),
                     ),
                   ],
@@ -443,6 +449,7 @@ class _EditableTile extends StatelessWidget {
     final hidden = state.isHiddenOnHome(bookmark);
     final markers = <String>[
       if (bookmark.favorite) '★ 我的最爱',
+      if (state.isCoolingDown(bookmark)) '刚看过',
       if (bookmark.hidden) '已隐藏',
       if (!bookmark.hidden && state.isCategoryHidden(bookmark.categoryId))
         '分类已隐藏',
@@ -647,10 +654,17 @@ class _TileBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final thumbnail = bookmark.thumbnailPath;
+    // 防反复看：刚看过的书签整块压成灰的，并显示还要等多久。
+    final state = AppScope.of(context);
+    final bool cooling = state.isCoolingDown(bookmark);
+    final Duration left =
+        cooling ? state.cooldownRemaining(bookmark) : Duration.zero;
 
     return Material(
       color: Colors.transparent,
-      child: InkWell(
+      child: Stack(
+        children: <Widget>[
+          InkWell(
         // The whole tile is tappable, caption included: with the title below
         // the square, tapping the text must open the bookmark too.
         onTap: onOpen,
@@ -706,6 +720,7 @@ class _TileBody extends StatelessWidget {
                                 right: 6,
                                 child: _AllowedBadge(),
                               ),
+                            if (cooling) Center(child: _CooldownBadge(left: left)),
                           ],
                         ),
                       ),
@@ -735,7 +750,53 @@ class _TileBody extends StatelessWidget {
               style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
             ),
           ],
-        ),
+              ),
+            ),
+          // 一层灰罩住整块（缩略图与文字都压灰）。点击拦截在 StartView 判定，
+          // 这里用 IgnorePointer 让点击穿透到下面本来就有的 InkWell。
+          if (cooling)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF9E9E9E).withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The chip over a tile that was watched too recently: how long until it opens.
+class _CooldownBadge extends StatelessWidget {
+  const _CooldownBadge({required this.left});
+
+  /// Time left before the bookmark may be opened again.
+  final Duration left;
+
+  @override
+  Widget build(BuildContext context) {
+    final int minutes = (left.inSeconds / 60).ceil().clamp(1, 600);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.62),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          const Icon(Icons.hourglass_bottom, size: 14, color: Colors.white),
+          const SizedBox(width: 5),
+          Text(
+            '$minutes 分钟后可再看',
+            style: const TextStyle(color: Colors.white, fontSize: 12),
+          ),
+        ],
       ),
     );
   }

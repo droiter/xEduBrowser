@@ -35,13 +35,14 @@ void main() {
   Future<void> pumpHome(
     WidgetTester tester, {
     ValueChanged<String>? onNavigate,
+    AppState? withState,
   }) async {
     tester.view.physicalSize = const Size(1500, 1400);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(
       AppScope(
-        state: state,
+        state: withState ?? state,
         child: MaterialApp(
           theme: AppTheme.light,
           locale: const Locale('zh', 'CN'),
@@ -405,6 +406,83 @@ void main() {
       tester.getRect(find.byTooltip('课程平台')).top,
       reason: '退出后两块仍在同一行',
     );
+  });
+
+  testWidgets('防反复看：看过的书签变灰、点击不响应，到点又能看', (tester) async {
+    final Directory cooldownDir =
+        Directory.systemTemp.createTempSync('tb_cooldown_ui');
+    addTearDown(() {
+      if (cooldownDir.existsSync()) cooldownDir.deleteSync(recursive: true);
+    });
+    DateTime now = DateTime(2026, 9, 29, 10, 0);
+    final AppState cooling = AppState(
+      store: ConfigStore(cooldownDir),
+      settings: AppSettings(
+        localServerEnabled: false,
+        localServerRoot: cooldownDir.path,
+        antiRepeatMinutes: 10,
+      ),
+      clock: () => now,
+    );
+    late Bookmark bookmark;
+    await tester.runAsync(() async {
+      bookmark = await cooling.addBookmark(
+        url: 'https://watched.test/',
+        title: '看过的',
+      );
+      await cooling.markBookmarkOpened(bookmark);
+    });
+
+    final opened = <String>[];
+    await pumpHome(tester, withState: cooling, onNavigate: opened.add);
+
+    // 灰掉 + 显示剩余时间。
+    expect(find.text('10 分钟后可再看'), findsOneWidget);
+
+    await tester.tap(find.text('看过的'));
+    await tester.pumpAndSettle();
+    expect(opened, isEmpty, reason: '冷却期内点击不响应');
+    expect(find.textContaining('刚看过'), findsWidgets, reason: '要说明为什么打不开');
+
+    // 时间走过窗口：定时器把灰块恢复，点击也能打开。
+    now = now.add(const Duration(minutes: 11));
+    await tester.pump(const Duration(minutes: 11));
+    await tester.pumpAndSettle();
+    expect(find.text('10 分钟后可再看'), findsNothing);
+
+    await tester.tap(find.text('看过的'));
+    await tester.pumpAndSettle();
+    expect(opened, <String>['https://watched.test/']);
+  });
+
+  testWidgets('编辑模式有「回到顶部」，点了就回到墙顶', (tester) async {
+    await tester.runAsync(() async {
+      final lessons = await state.addCategory('课程');
+      for (int i = 0; i < 40; i++) {
+        await state.addBookmark(
+          url: 'https://site$i.test/page',
+          title: '书签 $i',
+          categoryId: lessons.id,
+        );
+      }
+      state.setHomeEditMode(true);
+    });
+
+    await pumpHome(tester);
+
+    Finder wallScrollable() => find
+        .descendant(of: find.byType(StartView), matching: find.byType(Scrollable))
+        .first;
+    double offset() =>
+        tester.state<ScrollableState>(wallScrollable()).position.pixels;
+
+    await tester.drag(find.byType(StartView), const Offset(0, -1200));
+    await tester.pumpAndSettle();
+    expect(offset(), greaterThan(0), reason: '先滚下去');
+
+    await tester.tap(find.byKey(homeEditTopKey));
+    await tester.pumpAndSettle();
+    expect(offset(), 0, reason: '「回到顶部」应把墙拉回最上面');
   });
 
   testWidgets('墙是懒加载的：一百多个书签也只构建看得见的那几行', (tester) async {

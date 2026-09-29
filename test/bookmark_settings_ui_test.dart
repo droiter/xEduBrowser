@@ -151,6 +151,40 @@ void main() {
     expect(state.settings.toNativeSettings()['localFetchShim'], isTrue);
   });
 
+  testWidgets('防反复看：开关缺省开启，时长可配置', (tester) async {
+    await pumpSettings(tester, openBookmarkManager: false);
+
+    final Finder toggle = find.ancestor(
+      of: find.text('防反复看（看过先变灰，过一会儿才能再看）'),
+      matching: find.byType(SwitchListTile),
+    );
+    await tester.scrollUntilVisible(
+      toggle,
+      320,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+
+    // 缺省就是开的，10 分钟。
+    expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
+    expect(state.settings.antiRepeatEnabled, isTrue);
+    expect(state.settings.antiRepeatMinutes, 10);
+
+    // 时长字段：填一个数字并提交，写进设置。
+    final Finder minutes = find.widgetWithText(TextField, '多久之后才能再看（分钟）');
+    expect(minutes, findsOneWidget);
+    await tester.enterText(minutes, '25');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(state.settings.antiRepeatMinutes, 25);
+
+    // 关掉开关：字段收起，设置写入。
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(state.settings.antiRepeatEnabled, isFalse);
+    expect(find.widgetWithText(TextField, '多久之后才能再看（分钟）'), findsNothing);
+  });
+
   testWidgets('书签管理排在设置最后，点进去是单独一页', (tester) async {
     await pumpSettings(tester, openBookmarkManager: false);
 

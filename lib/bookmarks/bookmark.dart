@@ -90,6 +90,13 @@ class Bookmark {
   /// always unhide it again.
   final bool hidden;
 
+  /// When this bookmark was last opened from the wall, or null when it never was
+  /// (or was opened before 防反复看 started recording).
+  ///
+  /// Persisted on purpose: the cooldown is a rule the child should not be able to
+  /// clear by restarting the app.
+  final DateTime? lastOpenedAt;
+
   const Bookmark({
     required this.id,
     required this.url,
@@ -101,6 +108,7 @@ class Bookmark {
     this.order = 0,
     this.favorite = false,
     this.hidden = false,
+    this.lastOpenedAt,
   });
 
   /// The bookmark's own URL prefix rule — the first pattern it granted, or null
@@ -162,6 +170,8 @@ class Bookmark {
     int? order,
     bool? favorite,
     bool? hidden,
+    DateTime? lastOpenedAt,
+    bool clearLastOpened = false,
   }) =>
       Bookmark(
         id: id,
@@ -176,6 +186,8 @@ class Bookmark {
         order: order ?? this.order,
         favorite: favorite ?? this.favorite,
         hidden: hidden ?? this.hidden,
+        lastOpenedAt:
+            clearLastOpened ? null : (lastOpenedAt ?? this.lastOpenedAt),
       );
 
   Map<String, dynamic> toJson() => {
@@ -193,6 +205,7 @@ class Bookmark {
         // Only written when true, so an untagged file stays as small as before.
         if (favorite) 'favorite': true,
         if (hidden) 'hidden': true,
+        if (lastOpenedAt != null) 'lastOpenedAt': lastOpenedAt!.toIso8601String(),
       };
 
   factory Bookmark.fromJson(Map<String, dynamic> json) {
@@ -215,6 +228,8 @@ class Bookmark {
       // Absent in version 2 files, where bookmarks had neither flag.
       favorite: json['favorite'] as bool? ?? false,
       hidden: json['hidden'] as bool? ?? false,
+      // Absent until 防反复看 recorded a first view.
+      lastOpenedAt: DateTime.tryParse(json['lastOpenedAt'] as String? ?? ''),
     );
   }
 }

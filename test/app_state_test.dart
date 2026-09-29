@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tablet_browser/policy/policy_config.dart';
+import 'package:tablet_browser/bookmarks/bookmark.dart';
 import 'package:tablet_browser/state/app_state.dart';
 
 void main() {
@@ -77,6 +78,25 @@ void main() {
       );
     });
 
+    test('防反复看 的默认值：开启、10 分钟', () async {
+      // 旧配置文件没有这两个键，也必须保持"开启 + 10 分钟"。
+      final loaded = AppSettings.fromJson(const <String, dynamic>{});
+      expect(loaded.antiRepeatEnabled, isTrue);
+      expect(loaded.antiRepeatMinutes, 10);
+      expect(const AppSettings().antiRepeatEnabled, isTrue);
+      expect(const AppSettings().antiRepeatMinutes, 10);
+
+      await store.saveSettings(
+        const AppSettings(antiRepeatEnabled: false, antiRepeatMinutes: 25),
+      );
+      final again = await store.loadSettings();
+      expect(again.antiRepeatEnabled, isFalse);
+      expect(again.antiRepeatMinutes, 25);
+      // 越界值被夹住，免得算出 0 分钟或几天的冷却。
+      expect(const AppSettings().copyWith(antiRepeatMinutes: 0).antiRepeatMinutes, 1);
+      expect(const AppSettings().copyWith(antiRepeatMinutes: 99999).antiRepeatMinutes, 600);
+    });
+
     test('export/import round trips, and rejects non-objects', () {
       const config = PolicyConfig(
         rules: [PolicyRule(pattern: 'example.com', kind: PolicyListKind.blacklist)],
@@ -88,6 +108,84 @@ void main() {
       expect(imported.rules.single.pattern, 'example.com');
 
       expect(() => store.importPolicy('[1,2,3]'), throwsFormatException);
+    });
+  });
+
+  group('防反复看', () {
+    late Directory cooldownDir;
+    late DateTime now;
+
+    AppState buildCooling({bool enabled = true, int minutes = 10}) => AppState(
+          store: ConfigStore(cooldownDir),
+          settings: AppSettings(
+            localServerEnabled: false,
+            antiRepeatEnabled: enabled,
+            antiRepeatMinutes: minutes,
+          ),
+          clock: () => now,
+        );
+
+    setUp(() {
+      cooldownDir = Directory.systemTemp.createTempSync('tb_cooldown');
+      now = DateTime(2026, 9, 29, 10, 0);
+    });
+
+    tearDown(() {
+      if (cooldownDir.existsSync()) cooldownDir.deleteSync(recursive: true);
+    });
+
+    test('看过之后锁定 N 分钟，到点自动解锁', () async {
+      final state = buildCooling();
+      final bookmark = await state.addBookmark(url: 'https://a.test/', title: 'A');
+      expect(state.isCoolingDown(bookmark), isFalse, reason: '没看过就不锁');
+
+      await state.markBookmarkOpened(bookmark);
+      Bookmark watched() => state.bookmarkFor('https://a.test/')!;
+      expect(watched().lastOpenedAt, DateTime(2026, 9, 29, 10, 0));
+      expect(state.isCoolingDown(watched()), isTrue);
+      expect(state.cooldownRemaining(watched()).inMinutes, 10);
+      expect(state.nextCooldownDeadline(), DateTime(2026, 9, 29, 10, 10));
+      expect(state.nextCooldownWait(), const Duration(minutes: 10));
+
+      now = now.add(const Duration(minutes: 9, seconds: 59));
+      expect(state.isCoolingDown(watched()), isTrue);
+      expect(state.cooldownRemaining(watched()).inSeconds, 1);
+
+      now = now.add(const Duration(seconds: 1));
+      expect(state.isCoolingDown(watched()), isFalse);
+      expect(state.cooldownRemaining(watched()), Duration.zero);
+      expect(state.nextCooldownDeadline(), isNull);
+    });
+
+    test('N 可配置', () async {
+      final state = buildCooling(minutes: 30);
+      final bookmark = await state.addBookmark(url: 'https://b.test/', title: 'B');
+      await state.markBookmarkOpened(bookmark);
+      now = now.add(const Duration(minutes: 29));
+      expect(state.isCoolingDown(state.bookmarkFor('https://b.test/')!), isTrue);
+      now = now.add(const Duration(minutes: 2));
+      expect(state.isCoolingDown(state.bookmarkFor('https://b.test/')!), isFalse);
+    });
+
+    test('关掉开关后既不锁定也不记录', () async {
+      final state = buildCooling(enabled: false);
+      final bookmark = await state.addBookmark(url: 'https://c.test/', title: 'C');
+      await state.markBookmarkOpened(bookmark);
+      final stored = state.bookmarkFor('https://c.test/')!;
+      expect(stored.lastOpenedAt, isNull, reason: '关闭时不该留下时间戳');
+      expect(state.isCoolingDown(stored), isFalse);
+      expect(state.nextCooldownDeadline(), isNull);
+    });
+
+    test('取最近一次解锁时间', () async {
+      final state = buildCooling();
+      final first = await state.addBookmark(url: 'https://d.test/', title: 'D');
+      final second = await state.addBookmark(url: 'https://e.test/', title: 'E');
+      await state.markBookmarkOpened(first);
+      now = now.add(const Duration(minutes: 5));
+      await state.markBookmarkOpened(second);
+      // 先看的那个先解锁。
+      expect(state.nextCooldownDeadline(), DateTime(2026, 9, 29, 10, 10));
     });
   });
 

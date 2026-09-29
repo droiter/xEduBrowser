@@ -66,6 +66,17 @@ class AppSettings {
   /// while the child has been idle (see `ThumbnailBackfill`).
   final bool backfillThumbnails;
 
+  /// Grey a bookmark out for a while after the child watched it.
+  ///
+  /// **On by default**: without it the same cartoon gets opened again and again.
+  /// A watched bookmark turns grey with the time left and does not respond to a
+  /// tap until [antiRepeatMinutes] have passed. The parent's edit mode is exempt —
+  /// it neither blocks nor records.
+  final bool antiRepeatEnabled;
+
+  /// How long a watched bookmark stays locked, in minutes (kept at 1–600).
+  final int antiRepeatMinutes;
+
   /// Serve `fetch()` to local pages over XHR instead of letting it fail.
   ///
   /// Chromium refuses `fetch` for `file:` URLs (XHR on the same file is fine),
@@ -100,6 +111,8 @@ class AppSettings {
     this.bookmarkWhitelistByDefault = true,
     this.backfillThumbnails = true,
     this.localFetchShim = false,
+    this.antiRepeatEnabled = true,
+    this.antiRepeatMinutes = 10,
   });
 
   /// True once a parent password has been configured. While false, the gate
@@ -130,6 +143,8 @@ class AppSettings {
     bool? bookmarkWhitelistByDefault,
     bool? backfillThumbnails,
     bool? localFetchShim,
+    bool? antiRepeatEnabled,
+    int? antiRepeatMinutes,
   }) =>
       AppSettings(
         javaScript: javaScript ?? this.javaScript,
@@ -155,6 +170,9 @@ class AppSettings {
             bookmarkWhitelistByDefault ?? this.bookmarkWhitelistByDefault,
         backfillThumbnails: backfillThumbnails ?? this.backfillThumbnails,
         localFetchShim: localFetchShim ?? this.localFetchShim,
+        antiRepeatEnabled: antiRepeatEnabled ?? this.antiRepeatEnabled,
+        antiRepeatMinutes:
+            (antiRepeatMinutes ?? this.antiRepeatMinutes).clamp(1, 600),
       );
 
   Map<String, dynamic> toJson() => {
@@ -180,6 +198,8 @@ class AppSettings {
         'bookmarkWhitelistByDefault': bookmarkWhitelistByDefault,
         'backfillThumbnails': backfillThumbnails,
         'localFetchShim': localFetchShim,
+        'antiRepeatEnabled': antiRepeatEnabled,
+        'antiRepeatMinutes': antiRepeatMinutes,
       };
 
   /// The subset the native side consumes for the WebView.
@@ -223,6 +243,10 @@ class AppSettings {
         // A missing key means the setting did not exist when this file was
         // written; the patch is opt-in, so it stays off.
         localFetchShim: json['localFetchShim'] as bool? ?? false,
+        // 防反复看 是给孩子的默认行为：旧配置文件没有这两个键时也保持开启、10 分钟。
+        antiRepeatEnabled: json['antiRepeatEnabled'] as bool? ?? true,
+        antiRepeatMinutes:
+            ((json['antiRepeatMinutes'] as num?)?.toInt() ?? 10).clamp(1, 600),
       );
 }
 
@@ -371,12 +395,20 @@ class ConfigStore {
 /// [onPolicyChanged] / [onSettingsChanged] callbacks which the browser screen
 /// wires to the platform channel.
 class AppState extends ChangeNotifier {
-  AppState({required this.store, PolicyConfig? policy, AppSettings? settings})
-      : _policy = policy ?? PolicyConfig.empty,
-        _settings = settings ?? const AppSettings() {
+  AppState({
+    required this.store,
+    PolicyConfig? policy,
+    AppSettings? settings,
+    DateTime Function()? clock,
+  })  : _policy = policy ?? PolicyConfig.empty,
+        _settings = settings ?? const AppSettings(),
+        _now = clock ?? DateTime.now {
     bookmarkStore = BookmarkStore(store.directory);
     _rebuildEngine();
   }
+
+  /// The clock the cooldown reads, so tests can move time without waiting.
+  final DateTime Function() _now;
 
   final ConfigStore store;
 
@@ -969,6 +1001,71 @@ class AppState extends ChangeNotifier {
   /// Whether [categoryId]'s section is hidden on the home page. 未分类 is not a
   /// real category, so it can never be hidden as a group.
   bool isCategoryHidden(String categoryId) => categoryById(categoryId)?.hidden ?? false;
+
+  // ------------------------------------------------------------ 防反复看
+
+  /// How long a watched bookmark stays locked.
+  Duration get _antiRepeatWindow =>
+      Duration(minutes: _settings.antiRepeatMinutes.clamp(1, 600));
+
+  /// Whether [bookmark] was watched so recently that it must not open again.
+  ///
+  /// Off when the setting is off, and for a bookmark that has never been opened
+  /// (or was opened before the feature recorded anything).
+  bool isCoolingDown(Bookmark bookmark) {
+    if (!_settings.antiRepeatEnabled) return false;
+    final DateTime? last = bookmark.lastOpenedAt;
+    if (last == null) return false;
+    return _now().isBefore(last.add(_antiRepeatWindow));
+  }
+
+  /// How much longer [bookmark] stays locked; [Duration.zero] when it can open now.
+  Duration cooldownRemaining(Bookmark bookmark) {
+    if (!isCoolingDown(bookmark)) return Duration.zero;
+    final Duration left =
+        bookmark.lastOpenedAt!.add(_antiRepeatWindow).difference(_now());
+    return left.isNegative ? Duration.zero : left;
+  }
+
+  /// When the bookmark closest to unlocking may be watched again, or null when
+  /// nothing is cooling down. The wall schedules a single refresh for it.
+  DateTime? nextCooldownDeadline() {
+    if (!_settings.antiRepeatEnabled) return null;
+    DateTime? soonest;
+    final DateTime now = _now();
+    for (final bookmark in _library.bookmarks) {
+      final DateTime? last = bookmark.lastOpenedAt;
+      if (last == null) continue;
+      final DateTime until = last.add(_antiRepeatWindow);
+      if (!now.isBefore(until)) continue;
+      if (soonest == null || until.isBefore(soonest)) soonest = until;
+    }
+    return soonest;
+  }
+
+  /// How long until [nextCooldownDeadline] arrives, or null when nothing is
+  /// cooling down.
+  ///
+  /// Computed with the same clock the cooldown uses: the wall schedules its
+  /// refresh from this, and mixing in `DateTime.now()` would misfire whenever the
+  /// two disagree (a test clock, or a device whose time was changed).
+  Duration? nextCooldownWait() {
+    final DateTime? due = nextCooldownDeadline();
+    if (due == null) return null;
+    final Duration left = due.difference(_now());
+    return left.isNegative ? Duration.zero : left;
+  }
+
+  /// Records that the child opened [bookmark] from the wall.
+  ///
+  /// Doing nothing while the setting is off keeps the stored timestamps honest:
+  /// switching the feature on later must not inherit views from before it existed.
+  Future<void> markBookmarkOpened(Bookmark bookmark) async {
+    if (!_settings.antiRepeatEnabled) return;
+    final Bookmark? current = bookmarkFor(bookmark.url);
+    if (current == null) return;
+    await updateBookmark(current.copyWith(lastOpenedAt: _now()));
+  }
 
   /// Hides a category — and with it every bookmark filed under it — or shows it
   /// again. Everything stays in the library; only the wall changes.

@@ -40,6 +40,8 @@ void main() {
           thumbnailPath: '/tmp/x.png',
           createdAt: DateTime(2026, 2, 3, 4, 5),
           whitelistPatterns: ['https://school.test/lessons', 'https://school.test'],
+          // 防反复看 的"上次看过"必须跟着书签落盘：重启应用不能提前解锁。
+          lastOpenedAt: DateTime(2026, 2, 3, 6, 30),
         ),
         Bookmark(
           id: 'a2',
@@ -58,7 +60,9 @@ void main() {
       expect(loaded.first.whitelistPatterns,
           ['https://school.test/lessons', 'https://school.test']);
       expect(loaded.first.whitelistPattern, 'https://school.test/lessons');
+      expect(loaded.first.lastOpenedAt, DateTime(2026, 2, 3, 6, 30));
       expect(loaded.last.whitelistPatterns, isEmpty);
+      expect(loaded.last.lastOpenedAt, isNull, reason: '没看过就是没有时间戳');
     });
 
     test('reads the single-pattern field written by an older build', () async {

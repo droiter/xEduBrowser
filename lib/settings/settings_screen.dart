@@ -416,6 +416,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
           '写明补的是哪一本、还剩几个；起始页、PDF 这类截不到图的书签会保持字母方块。'
           '关闭后书签只保存地址，不再改动白名单；已有的白名单规则不会因此被删除。',
         ),
+        const Divider(height: 26),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: settings.antiRepeatEnabled,
+          onChanged: (bool value) => _apply(
+            (AppSettings current) => current.copyWith(antiRepeatEnabled: value),
+          ),
+          title: const Text('防反复看（看过先变灰，过一会儿才能再看）'),
+          subtitle: const Text('从首页点开过的书签会变灰并显示剩余时间，时间到之前再点不会打开；'
+              '时间存进书签本身，重启应用也不会提前解锁。家长在编辑模式里不受限制。'),
+        ),
+        if (settings.antiRepeatEnabled) ...[
+          const SizedBox(height: 6),
+          _CommitTextField(
+            label: '多久之后才能再看（分钟）',
+            value: '${settings.antiRepeatMinutes}',
+            hint: '默认 10',
+            keyboardType: TextInputType.number,
+            inputFormatters: <TextInputFormatter>[
+              FilteringTextInputFormatter.digitsOnly,
+            ],
+            validator: (String value) {
+              final int? minutes = int.tryParse(value.trim());
+              if (minutes == null || minutes < 1 || minutes > 600) {
+                return '请填 1–600 之间的分钟数';
+              }
+              return null;
+            },
+            onCommit: (String text) {
+              final int? minutes = int.tryParse(text.trim());
+              if (minutes == null) return;
+              _apply((AppSettings current) =>
+                  current.copyWith(antiRepeatMinutes: minutes));
+            },
+          ),
+          const HintText(
+            '只对「从首页点开」计数：家长在编辑模式里点开、或从书签管理页进去，都不会锁定它；'
+            '关闭开关后已记录的看过时间仍留在书签里，重新打开开关会接着生效。',
+          ),
+        ],
       ],
     );
   }

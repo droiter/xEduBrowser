@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../bookmarks/bookmark_grid.dart';
 import '../parental/parental_password_prompt.dart';
+import '../bookmarks/bookmark.dart';
 import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import '../ui/theme.dart';
@@ -32,6 +35,15 @@ class _StartViewState extends State<StartView> {
   /// because this widget is disposed the moment a page opens.
   ScrollController? _controller;
 
+  /// One refresh scheduled for the moment the next 防反复看 lock expires, so a
+  /// greyed tile comes back on its own. Deliberately a **single** timer rather
+  /// than a repeating one: a periodic timer would keep `pumpAndSettle` — and the
+  /// frame loop — busy forever.
+  Timer? _cooldownRefresh;
+
+  /// The deadline [_cooldownRefresh] was scheduled for; null when none is set.
+  DateTime? _cooldownRefreshDue;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -48,8 +60,64 @@ class _StartViewState extends State<StartView> {
 
   @override
   void dispose() {
+    _cooldownRefresh?.cancel();
     _controller?.dispose();
     super.dispose();
+  }
+
+  /// Rolls the wall back to the top: a parent who scrolled down to find a tile
+  /// edits it, then wants the toolbar (and the rest of the wall) again.
+  Future<void> _scrollToTop() async {
+    final controller = _controller;
+    if (controller == null || !controller.hasClients) return;
+    await controller.animateTo(
+      0,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  /// Opens [bookmark] unless 防反复看 says it was watched too recently.
+  ///
+  /// Edit mode is the parent's tool: it neither blocks nor records, so checking a
+  /// page from there never locks the child out.
+  void _openBookmark(BuildContext context, AppState state, Bookmark bookmark) {
+    if (state.homeEditMode) {
+      widget.onNavigate(bookmark.url);
+      return;
+    }
+    final Duration left = state.cooldownRemaining(bookmark);
+    if (left > Duration.zero) {
+      final int minutes = (left.inSeconds / 60).ceil().clamp(1, 600);
+      showAppSnackBar(
+        context,
+        '「${bookmark.displayTitle}」刚看过，$minutes 分钟后才能再看',
+      );
+      return;
+    }
+    unawaited(state.markBookmarkOpened(bookmark));
+    widget.onNavigate(bookmark.url);
+  }
+
+  /// Schedules one rebuild for when the nearest cooldown ends.
+  ///
+  /// Rescheduling only when the deadline actually changes keeps a rebuild-happy
+  /// wall from pushing the timer back forever.
+  void _scheduleCooldownRefresh(AppState state) {
+    final DateTime? due = state.nextCooldownDeadline();
+    if (due == _cooldownRefreshDue) return;
+    _cooldownRefreshDue = due;
+    _cooldownRefresh?.cancel();
+    _cooldownRefresh = null;
+    if (due == null) return;
+    final Duration wait = state.nextCooldownWait() ?? Duration.zero;
+    _cooldownRefresh = Timer(
+      wait + const Duration(milliseconds: 250),
+      () {
+        _cooldownRefreshDue = null;
+        if (mounted) setState(() {});
+      },
+    );
   }
 
   /// Asks for the parental password, then turns edit mode on.
@@ -90,10 +158,15 @@ class _StartViewState extends State<StartView> {
     // and in edit mode, where each tile carries six buttons, that stuttered.
     return Material(
       type: MaterialType.transparency,
-      child: LayoutBuilder(
+      child: Stack(
+        children: <Widget>[
+          Positioned.fill(
+            child: LayoutBuilder(
         builder: (BuildContext context, BoxConstraints constraints) {
           // Measured once here: the wall's own width, for the edit-mode rows.
           final double wallWidth = (constraints.maxWidth - 56).clamp(160.0, 100000.0);
+          // 防反复看：为最近一次解锁安排一次刷新，灰块到点自己恢复。
+          _scheduleCooldownRefresh(state);
           return CustomScrollView(
         controller: _controller,
         slivers: <Widget>[
@@ -142,13 +215,30 @@ class _StartViewState extends State<StartView> {
               // 打开网页**不退出编辑模式**：家长常常是点开一条看看页面对不对，
               // 回到首页还要接着改。而且编辑模式是行布局、非编辑模式是方块布局，
               // 一进一出就回不到原来那一行了（滚动位置相同、看到的内容却变了）。
-              onOpen: widget.onNavigate,
+              onOpen: (Bookmark bookmark) =>
+                  _openBookmark(context, state, bookmark),
               editing: state.homeEditMode,
             ),
           ),
             ],
           );
         },
+            ),
+          ),
+          // 编辑模式的「回到顶部」做成浮动按钮：表头会随滚动移出屏幕，钉在表头里的
+          // 按钮滚下去就够不着了，而这个按钮在任何位置都能点。
+          if (state.homeEditMode)
+            Positioned(
+              right: 20,
+              bottom: 20,
+              child: FloatingActionButton.small(
+                key: homeEditTopKey,
+                tooltip: '回到顶部',
+                onPressed: _scrollToTop,
+                child: const Icon(Icons.vertical_align_top),
+              ),
+            ),
+        ],
       ),
     );
   }
