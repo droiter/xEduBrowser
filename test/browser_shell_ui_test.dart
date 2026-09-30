@@ -300,7 +300,7 @@ void main() {
     );
     await waitFor(
       tester,
-      () => find.textContaining('固定桌面已开启').evaluate().isNotEmpty,
+      () => find.textContaining('已请求固定').evaluate().isNotEmpty,
     );
     expect(
       tester
@@ -322,7 +322,7 @@ void main() {
     );
     await waitFor(
       tester,
-      () => find.textContaining('已解除固定桌面').evaluate().isNotEmpty,
+      () => find.textContaining('已请求解除固定').evaluate().isNotEmpty,
     );
     expect(
       tester
@@ -333,6 +333,53 @@ void main() {
           .icon,
       Icons.push_pin_outlined,
     );
+  });
+
+  testWidgets('固定桌面：系统还没跟上时，按钮也不能"按一次不动"', (tester) async {
+    final List<String> calls = <String>[];
+    // 模拟最坏情况：系统要等确认框，状态一直没变（仍返回 none）。
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+      const MethodChannel('tablet_browser/commands'),
+      (MethodCall call) async {
+        if (call.method.toLowerCase().contains('locktask')) {
+          calls.add(call.method);
+          return <String, dynamic>{'state': 'none'};
+        }
+        return null;
+      },
+    );
+
+    await pumpShell(tester);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+    await tester.pumpAndSettle();
+
+    final Finder pin = find.byKey(lockTaskToggleKey);
+    Icon pinIcon() => tester.widget<Icon>(
+          find.descendant(of: pin, matching: find.byType(Icon)),
+        );
+
+    expect(pinIcon().icon, Icons.push_pin_outlined, reason: '缺省未固定');
+
+    // 第一次按：请求固定，按钮**立刻**变成已固定——这正是原来缺的那一步
+    // （原来按钮看的是系统的即时状态，系统还没生效时按了等于没按）。
+    await tester.tap(pin);
+    await tester.pumpAndSettle();
+    await waitFor(tester, () => state.settings.lockTaskEnabled == true);
+    expect(pinIcon().icon, Icons.push_pin);
+    expect(calls, contains('startLockTask'));
+
+    // 第二次按：必须是"解除固定"，而不是又一次 startLockTask。
+    await tester.tap(pin);
+    await tester.pumpAndSettle();
+    await waitFor(tester, () => state.settings.lockTaskEnabled == false);
+    expect(pinIcon().icon, Icons.push_pin_outlined);
+    expect(
+      calls.where((String method) => method == 'startLockTask').length,
+      1,
+      reason: '第二次按下去不该再发 startLockTask',
+    );
+    expect(calls, contains('stopLockTask'));
   });
 
   testWidgets('back on the start page leaves the app alone', (tester) async {

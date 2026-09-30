@@ -74,9 +74,16 @@ class _BrowserScreenState extends State<BrowserScreen> {
   bool _wired = false;
   int _activeIndex = 0;
 
-  /// 固定桌面 是否真的生效了（系统的真实状态，由 [BrowserBridge.lockTaskState]
-  /// 与每次切换后的回报决定；"设置里想要"不等于"系统答应了"）。
-  bool _pinned = false;
+  /// 固定桌面 的**意图**（设置里的值）。按钮显示的是它：按下立刻翻转，不需要等系统。
+  bool _pinWanted = false;
+
+  /// 系统**真实**的锁定任务状态。进入/退出不是同步的（未白名单时还要等用户确认
+  /// 系统弹框），所以它只用于提示与复核，绝不用来决定"下一次按下去该开还是该关"。
+  bool _pinActive = false;
+
+  /// 追踪锁定任务是否已经跟上意图（每 400ms 读一次，最多 6 次）。
+  Timer? _pinSettleTimer;
+  int _pinSettleTicks = 0;
 
   /// Bookmark ids whose preview was already refreshed during this app run, so a
   /// page that reloads (or is opened twice) is not re-screenshotted every time.
@@ -119,12 +126,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _eventSubscription = BrowserBridge.eventStream()
         .map(BrowserEvent.fromMap)
         .listen(_onNativeEvent);
-    unawaited(_refreshPinned());
+    _pinWanted = _state?.settings.lockTaskEnabled ?? false;
+    unawaited(_refreshPinActive());
     _addTab(activate: true);
   }
 
   @override
   void dispose() {
+    _pinSettleTimer?.cancel();
     unawaited(_eventSubscription?.cancel());
     for (final timer in _loadWatchdogs.values) {
       timer.cancel();
@@ -557,37 +566,78 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
   // ------------------------------------------------------- 固定桌面（LockTask）
 
-  /// Reads the platform's real lock task state. The switch reflects **that**, not
-  /// the stored wish: a device that refuses pinning must not show a filled pin.
-  Future<void> _refreshPinned() async {
+  /// Reads the platform's real lock task state into [_pinActive].
+  ///
+  /// Only ever *reports*; it never rewrites [_pinWanted], because "the system has
+  /// not switched yet" is not the same as "the user changed their mind".
+  Future<void> _refreshPinActive() async {
     final String result = await BrowserBridge.lockTaskState();
     if (!mounted) return;
-    setState(() => _pinned = result != 'none');
+    final bool active = result != 'none';
+    if (active == _pinActive) return;
+    setState(() => _pinActive = active);
   }
 
-  /// Toggles 固定桌面 and remembers the wish for the next launch.
+  /// Toggles 固定桌面.
   ///
-  /// Whatever the system answers is reported: entering lock task is the device's
-  /// call (it may ask for confirmation, or refuse when pinning is switched off in
-  /// Settings), and pretending otherwise would leave a parent thinking the Home
-  /// key is blocked when it is not.
+  /// The button follows the **intent**, which flips the moment it is pressed and
+  /// is stored for the next launch. That is what a switch has to do: reading the
+  /// platform back first made the button lag one press behind, because Android
+  /// enters lock task *after* the system confirmation — the first press pinned
+  /// while the icon still looked off, the second then "turned it on" again
+  /// without unpinning anything.
+  ///
+  /// Whether the device actually obliged is a separate matter, so it is polled
+  /// ([_startPinSettle]) and reported; a refusal never silently flips the switch
+  /// back, it says so.
   Future<void> _togglePinned() async {
     final state = _state;
-    final bool want = !_pinned;
+    final bool want = !_pinWanted;
+    setState(() => _pinWanted = want);
+    // 先落一份"想要的状态"（不阻塞下面真正的动作：写盘是真实 I/O，会慢一拍），
+    // 然后立刻去请求系统——按钮的反馈不该排在磁盘后面。
+    final Future<void> persisted = state == null
+        ? Future<void>.value()
+        : state.updateSettings(state.settings.copyWith(lockTaskEnabled: want));
     final String result = await BrowserBridge.syncDesktopPin(wanted: want);
     if (!mounted) return;
-    setState(() => _pinned = result != 'none');
-    if (state != null) {
-      await state.updateSettings(state.settings.copyWith(lockTaskEnabled: want));
-    }
-    if (!mounted) return;
-    if (want && result == 'none') {
-      _snack('系统没有允许固定桌面：请在系统设置里开启「固定窗口」，或在下一次弹框时确认');
-    } else if (result == 'none') {
-      _snack('已解除固定桌面');
-    } else {
-      _snack('固定桌面已开启：Home 与最近任务键不再响应（按住「返回 + 最近任务」可解除）');
-    }
+    final bool activeNow = result != 'none';
+    if (activeNow != _pinActive) setState(() => _pinActive = activeNow);
+    _startPinSettle(want);
+    _snack(
+      want
+          ? '固定桌面：已请求固定（系统若弹框请确认；生效后 Home 与最近任务键不再响应）'
+          : '固定桌面：已请求解除固定',
+    );
+    await persisted;
+  }
+
+  /// Polls the platform until lock task matches [want] (or gives up after ~2.4s).
+  ///
+  /// Entering lock task is asynchronous — the state changes only after the system
+  /// confirmation — so the immediate read after the request is usually still
+  /// `none`. Each tick only rebuilds when the value really changed, so a settled
+  /// wall is not kept awake.
+  void _startPinSettle(bool want) {
+    _pinSettleTimer?.cancel();
+    _pinSettleTicks = 0;
+    _pinSettleTimer = Timer.periodic(const Duration(milliseconds: 400), (timer) async {
+      _pinSettleTicks += 1;
+      final String result = await BrowserBridge.lockTaskState();
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      final bool active = result != 'none';
+      if (active != _pinActive) setState(() => _pinActive = active);
+      final bool settled = active == want;
+      if (!settled && _pinSettleTicks < 6) return;
+      timer.cancel();
+      _pinSettleTimer = null;
+      if (!settled && want) {
+        _snack('系统还没有进入固定桌面：若弹了确认框请确认；一直没有的话，请在系统设置里开启「固定窗口」');
+      }
+    });
   }
 
   // --------------------------------------------------------- top-bar 后退
@@ -637,7 +687,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 onSelect: _selectTab,
                 onClose: _closeTab,
                 onAddTab: () => _addTab(activate: true),
-                pinned: _pinned,
+                pinWanted: _pinWanted,
+                pinActive: _pinActive,
                 onTogglePinned: _togglePinned,
                 onBack: _handleBackButton,
                 onForward: () => tab?.controller.goForward(),
@@ -750,7 +801,8 @@ class _BrowserTopBar extends StatelessWidget {
     required this.onSelect,
     required this.onClose,
     required this.onAddTab,
-    required this.pinned,
+    required this.pinWanted,
+    required this.pinActive,
     required this.onTogglePinned,
     required this.onBack,
     required this.onForward,
@@ -771,8 +823,11 @@ class _BrowserTopBar extends StatelessWidget {
   final ValueChanged<int> onClose;
   final VoidCallback onAddTab;
 
-  /// 固定桌面 当前是否生效（系统的真实状态，不是"想不想要"）。
-  final bool pinned;
+  /// 固定桌面 的意图（开关状态）：按钮显示的就是它。
+  final bool pinWanted;
+
+  /// 系统是否真的固定住了（用来在提示里如实说明）。
+  final bool pinActive;
 
   /// 切换「固定桌面」。
   final VoidCallback onTogglePinned;
@@ -902,16 +957,23 @@ class _BrowserTopBar extends StatelessWidget {
               },
             ),
           ),
-          // 固定桌面：与「+」「⋮」同一排。图标反映系统的真实状态：固定中为实心图钉。
+          // 固定桌面：与「+」「⋮」同一排。图标跟着**开关意图**走（按下即翻），
+          // 提示里如实写出系统那边的真实状态。
           IconButton(
             key: lockTaskToggleKey,
-            tooltip: pinned ? '固定桌面：已固定（点一下解除）' : '固定桌面（屏蔽 Home 键）',
+            tooltip: pinWanted
+                ? (pinActive
+                    ? '固定桌面：已固定（点一下解除）'
+                    : '固定桌面：已开启，但系统还没固定（点一下关闭）')
+                : (pinActive
+                    ? '固定桌面：已关闭，但系统仍在固定（点一下开启）'
+                    : '固定桌面：未固定（点一下开启，屏蔽 Home 键）'),
             visualDensity: VisualDensity.compact,
             onPressed: onTogglePinned,
             icon: Icon(
-              pinned ? Icons.push_pin : Icons.push_pin_outlined,
+              pinWanted ? Icons.push_pin : Icons.push_pin_outlined,
               size: 20,
-              color: pinned ? theme.colorScheme.primary : null,
+              color: pinWanted ? theme.colorScheme.primary : null,
             ),
           ),
           IconButton(
