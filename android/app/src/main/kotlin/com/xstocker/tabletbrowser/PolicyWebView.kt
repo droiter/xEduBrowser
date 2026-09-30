@@ -60,6 +60,16 @@ data class WebViewSettings(
      * to how pages behave.
      */
     val localFetchShim: Boolean = false,
+    /**
+     * 防翻页 — block input for a moment after the page turns (see [FlipGuard]).
+     *
+     * **Off by default on this side**: Dart owns the real default (on) and always
+     * sends both keys, so a map that omits them means "old caller" and must not
+     * silently start patching pages.
+     */
+    val flipGuardEnabled: Boolean = false,
+    /** How long a detected turn blocks input, in seconds (1–600). */
+    val flipGuardSeconds: Int = 2,
 ) {
     companion object {
         @JvmStatic
@@ -77,6 +87,9 @@ data class WebViewSettings(
                 textZoom = (map["textZoom"] as? Number)?.toInt() ?: base.textZoom,
                 blockPageHtml = map["blockPageHtml"] as? String,
                 localFetchShim = map["localFetchShim"] as? Boolean ?: base.localFetchShim,
+                flipGuardEnabled = map["flipGuardEnabled"] as? Boolean ?: base.flipGuardEnabled,
+                flipGuardSeconds = (map["flipGuardSeconds"] as? Number)?.toInt()
+                    ?: base.flipGuardSeconds,
             )
         }
 
@@ -97,6 +110,10 @@ data class WebViewSettings(
                 blockPageHtml = if (patch.containsKey("blockPageHtml")) patch["blockPageHtml"] as? String
                 else base.blockPageHtml,
                 localFetchShim = patch["localFetchShim"] as? Boolean ?: base.localFetchShim,
+                flipGuardEnabled = patch["flipGuardEnabled"] as? Boolean
+                    ?: base.flipGuardEnabled,
+                flipGuardSeconds = (patch["flipGuardSeconds"] as? Number)?.toInt()
+                    ?: base.flipGuardSeconds,
             )
         }
     }
@@ -349,9 +366,18 @@ class PolicyWebView(
      */
     private var fetchShimHandler: ScriptHandler? = null
 
+    /**
+     * The document-start handler registered for [FlipGuard], plus the cool-down it
+     * was built with: the script inlines its cool-down, so a different value needs
+     * a fresh handler.
+     */
+    private var flipGuardHandler: ScriptHandler? = null
+    private var flipGuardSecondsInstalled: Int? = null
+
     init {
         webView.settings.applyPolicySettings(settings, defaultUserAgent)
         applyFetchShim()
+        applyFlipGuard()
         webView.webViewClient = PolicyClient()
         webView.webChromeClient = PolicyChromeClient()
         webView.setDownloadListener(DownloadListener { url, userAgent, contentDisposition, mimeType, contentLength ->
@@ -373,6 +399,9 @@ class PolicyWebView(
         // "installed or not" state honest for anything that outlives the view.
         fetchShimHandler?.remove()
         fetchShimHandler = null
+        flipGuardHandler?.remove()
+        flipGuardHandler = null
+        flipGuardSecondsInstalled = null
         try {
             webView.stopLoading()
             webView.webChromeClient = null
@@ -444,6 +473,7 @@ class PolicyWebView(
         settings = WebViewSettings.merge(settings, patch)
         if (!disposed) webView.settings.applyPolicySettings(settings, defaultUserAgent)
         applyFetchShim()
+        applyFlipGuard()
     }
 
     /**
@@ -459,6 +489,37 @@ class PolicyWebView(
             fetchShimHandler?.remove()
             fetchShimHandler = null
         }
+    }
+
+    /**
+     * Installs, removes or re-tunes [FlipGuard] to match the current settings.
+     *
+     * The cool-down is baked into the script, so changing *only* the seconds
+     * cannot just keep the handler: the already loaded document is told about the
+     * new value through `setCooldown`, while the handler is swapped so the next
+     * navigation starts with it.
+     */
+    private fun applyFlipGuard() {
+        val wanted = settings.flipGuardEnabled && settings.javaScript && !disposed
+        if (!wanted) {
+            flipGuardHandler?.remove()
+            flipGuardHandler = null
+            flipGuardSecondsInstalled = null
+            return
+        }
+        val seconds = settings.flipGuardSeconds.coerceIn(1, 600)
+        if (flipGuardHandler != null && flipGuardSecondsInstalled == seconds) return
+        if (flipGuardSecondsInstalled != null && flipGuardHandler != null) {
+            // Same document, new duration: patch it in place first.
+            try {
+                webView.evaluateJavascript(FlipGuard.cooldownSnippet(seconds), null)
+            } catch (t: Throwable) {
+                Log.w(TAG, "flip guard cool-down update failed for view $viewId", t)
+            }
+        }
+        flipGuardHandler?.remove()
+        flipGuardHandler = FlipGuard.install(webView, seconds)
+        flipGuardSecondsInstalled = if (flipGuardHandler != null) seconds else null
     }
 
     fun clearCache() {
@@ -625,6 +686,15 @@ class PolicyWebView(
             ) {
                 view.evaluateJavascript(LocalFetchShim.SCRIPT, null)
             }
+            // Same belt and braces for 防翻页: every document gets the guard, not
+            // just local ones, because a WebView without document-start injection
+            // has no other route. The script no-ops when it is already installed.
+            if (settings.flipGuardEnabled && settings.javaScript) {
+                view.evaluateJavascript(
+                    FlipGuard.scriptFor(settings.flipGuardSeconds),
+                    null,
+                )
+            }
         }
 
         override fun onPageFinished(view: WebView, url: String?) {
@@ -698,11 +768,17 @@ class PolicyWebView(
          * without adb. Source and line are what make it actionable.
          */
         override fun onConsoleMessage(consoleMessage: ConsoleMessage): Boolean {
+            val text = consoleMessage.message()
+            // 防翻页 narrates every detected turn; keep it in logcat so a support
+            // session can tell a false positive from a page that ignores the mask.
+            if (text.startsWith(FlipGuard.LOG_PREFIX)) {
+                Log.i("FlipGuard", "view $viewId $text")
+            }
             bridge.emit(
                 mapOf(
                     "type" to "consoleMessage",
                     "viewId" to viewId,
-                    "message" to consoleMessage.message(),
+                    "message" to text,
                     "level" to consoleMessage.messageLevel().name,
                     "source" to consoleMessage.sourceId(),
                     "line" to consoleMessage.lineNumber(),

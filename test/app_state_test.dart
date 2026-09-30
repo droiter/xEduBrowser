@@ -108,6 +108,34 @@ void main() {
       expect(const AppSettings().copyWith(antiRepeatMinutes: 99999).antiRepeatMinutes, 600);
     });
 
+    test('防翻页 的默认值：开启、2 秒', () async {
+      // 旧配置文件没有这两个键，也必须保持"开启 + 2 秒"。
+      final loaded = AppSettings.fromJson(const <String, dynamic>{});
+      expect(loaded.flipGuardEnabled, isTrue);
+      expect(loaded.flipGuardSeconds, 2);
+      expect(const AppSettings().flipGuardEnabled, isTrue);
+      expect(const AppSettings().flipGuardSeconds, 2);
+
+      await store.saveSettings(
+        const AppSettings(flipGuardEnabled: false, flipGuardSeconds: 7),
+      );
+      final again = await store.loadSettings();
+      expect(again.flipGuardEnabled, isFalse);
+      expect(again.flipGuardSeconds, 7);
+      // 越界值被夹住：0 秒等于没锁，超大值等于页面被锁死。
+      expect(const AppSettings().copyWith(flipGuardSeconds: 0).flipGuardSeconds, 1);
+      expect(
+        const AppSettings().copyWith(flipGuardSeconds: 99999).flipGuardSeconds,
+        600,
+      );
+      // 两个键都要送进 WebView，否则原生侧会走"旧调用方"分支而不注入。
+      final Map<String, dynamic> native =
+          const AppSettings(flipGuardEnabled: false, flipGuardSeconds: 5)
+              .toNativeSettings();
+      expect(native['flipGuardEnabled'], isFalse);
+      expect(native['flipGuardSeconds'], 5);
+    });
+
     test('export/import round trips, and rejects non-objects', () {
       const config = PolicyConfig(
         rules: [PolicyRule(pattern: 'example.com', kind: PolicyListKind.blacklist)],

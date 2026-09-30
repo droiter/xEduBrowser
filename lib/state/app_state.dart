@@ -99,6 +99,36 @@ class AppSettings {
   /// page that relies on those would notice. Turn it on for a page that needs it.
   final bool localFetchShim;
 
+  /// 防翻页：锁住绘本"翻过去"的那一下。
+  ///
+  /// A picture book is one gesture per page, so a child can flick through the
+  /// whole thing in seconds. With this on, the WebView gets a document-start
+  /// script that drops a transparent mask over the page while it is "turning":
+  /// the mask lets everything through while the page is idle, then swallows
+  /// taps/swipes/keys for [flipGuardSeconds] once a turn is detected, and shows
+  /// a small 🔒 hint for blocked gestures.
+  ///
+  /// Detection is deliberately conservative, because the host cannot see "the
+  /// page turned" — it can only see symptoms of it:
+  ///  * a full-viewport picture swap (an `img`/`canvas`/`video`/background-image
+  ///    covering at least 55% of the viewport appearing, going away or changing),
+  ///  * a page-sized scroll jump (≥ 70% of the viewport),
+  ///  * a `#page=…` style hash/history change, or
+  ///  * a fallback for canvas-only readers that mutate nothing observable: a
+  ///    turn-ish input (horizontal swipe, tap in the outer 25% of the screen, or
+  ///    a page key) is latched and confirmed by either of the changes above
+  ///    within 1.5 s.
+  /// A small button in the middle of a game re-renders a screenful of DOM every
+  /// few hundred ms, which is why "any big DOM change" is *not* enough on its
+  /// own: with the picture/area test a quiz screen does not trip the guard.
+  ///
+  /// **On by default**: it is the whole point of a kids' reader, and the lock is
+  /// short ([flipGuardSeconds], 2 s) so a false positive costs one tap.
+  final bool flipGuardEnabled;
+
+  /// How long a detected turn blocks input, in seconds (kept at 1–600).
+  final int flipGuardSeconds;
+
   const AppSettings({
     this.javaScript = true,
     this.domStorage = true,
@@ -124,6 +154,8 @@ class AppSettings {
     this.antiRepeatEnabled = true,
     this.antiRepeatMinutes = 10,
     this.lockTaskEnabled = false,
+    this.flipGuardEnabled = true,
+    this.flipGuardSeconds = 2,
   });
 
   /// True once a parent password has been configured. While false, the gate
@@ -156,6 +188,8 @@ class AppSettings {
     bool? localFetchShim,
     bool? antiRepeatEnabled,
     int? antiRepeatMinutes,
+    bool? flipGuardEnabled,
+    int? flipGuardSeconds,
     bool? lockTaskEnabled,
   }) =>
       AppSettings(
@@ -185,6 +219,9 @@ class AppSettings {
         antiRepeatEnabled: antiRepeatEnabled ?? this.antiRepeatEnabled,
         antiRepeatMinutes:
             (antiRepeatMinutes ?? this.antiRepeatMinutes).clamp(1, 600),
+        flipGuardEnabled: flipGuardEnabled ?? this.flipGuardEnabled,
+        flipGuardSeconds:
+            (flipGuardSeconds ?? this.flipGuardSeconds).clamp(1, 600),
         lockTaskEnabled: lockTaskEnabled ?? this.lockTaskEnabled,
       );
 
@@ -214,6 +251,8 @@ class AppSettings {
         'antiRepeatEnabled': antiRepeatEnabled,
         'antiRepeatMinutes': antiRepeatMinutes,
         'lockTaskEnabled': lockTaskEnabled,
+        'flipGuardEnabled': flipGuardEnabled,
+        'flipGuardSeconds': flipGuardSeconds,
       };
 
   /// The subset the native side consumes for the WebView.
@@ -226,6 +265,8 @@ class AppSettings {
         'userAgent': userAgent,
         'textZoom': textZoom,
         'localFetchShim': localFetchShim,
+        'flipGuardEnabled': flipGuardEnabled,
+        'flipGuardSeconds': flipGuardSeconds,
       };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) => AppSettings(
@@ -263,6 +304,10 @@ class AppSettings {
             ((json['antiRepeatMinutes'] as num?)?.toInt() ?? 10).clamp(1, 600),
         // 固定桌面 缺省关闭：旧配置文件没有这个键时也关闭。
         lockTaskEnabled: json['lockTaskEnabled'] as bool? ?? false,
+        // 防翻页 跟 防反复看 一样是给孩子用的默认行为：旧配置文件也保持开启、2 秒。
+        flipGuardEnabled: json['flipGuardEnabled'] as bool? ?? true,
+        flipGuardSeconds:
+            ((json['flipGuardSeconds'] as num?)?.toInt() ?? 2).clamp(1, 600),
       );
 }
 

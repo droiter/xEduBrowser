@@ -456,6 +456,49 @@ class _SettingsScreenState extends State<SettingsScreen> {
             '关闭开关后已记录的看过时间仍留在书签里，重新打开开关会接着生效。',
           ),
         ],
+        const Divider(height: 26),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: settings.flipGuardEnabled,
+          onChanged: (bool value) => _apply(
+            (AppSettings current) => current.copyWith(flipGuardEnabled: value),
+          ),
+          title: const Text('防翻页（翻过去之后先停一下）'),
+          subtitle: const Text('绘本翻页后，页面上会盖一层看不见的遮罩：接下来几秒里再点、再滑、'
+              '按翻页键都不会有反应，底部会显示一个 🔒 提示，时间到自己恢复。'),
+        ),
+        if (settings.flipGuardEnabled) ...[
+          const SizedBox(height: 6),
+          _CommitTextField(
+            label: '翻页后锁多久（秒）',
+            value: '${settings.flipGuardSeconds}',
+            hint: '默认 2',
+            keyboardType: TextInputType.number,
+            inputFormatters: <TextInputFormatter>[
+              FilteringTextInputFormatter.digitsOnly,
+            ],
+            validator: (String value) {
+              final int? seconds = int.tryParse(value.trim());
+              if (seconds == null || seconds < 1 || seconds > 600) {
+                return '请填 1–600 之间的秒数';
+              }
+              return null;
+            },
+            onCommit: (String text) {
+              final int? seconds = int.tryParse(text.trim());
+              if (seconds == null) return;
+              _apply((AppSettings current) =>
+                  current.copyWith(flipGuardSeconds: seconds));
+            },
+          ),
+          const HintText(
+            '怎么判断「翻页了」：整屏图片被换掉（新增/删除/换 src）、地址里的 #page 变了，'
+            '或者检测到横向滑动、屏幕左右边缘的点击（这两类立刻生效）。屏幕中间的按钮、'
+            '打字、普通上下滚动都不会被锁，所以游戏里答题不受影响；'
+            '如果绘本是用 canvas 画出来的、DOM 完全不动，就只能靠横滑和边缘点击这类手势判断。'
+            '遮罩只在本页面里生效，不会挡住应用自己的按钮；关闭开关会立刻撤销。',
+          ),
+        ],
       ],
     );
   }
