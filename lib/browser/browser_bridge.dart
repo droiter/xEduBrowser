@@ -110,6 +110,33 @@ abstract final class BrowserBridge {
 
   static Future<void> clearCache() => _invoke<void>('clearCache');
 
+  /// 固定桌面：ask the system to enter lock task mode (screen pinning).
+  ///
+  /// Returns the platform's own state afterwards — `locked` (the app is
+  /// allowlisted or a device owner), `pinned` (the user confirmed screen pinning)
+  /// or `none` (refused, or pinning is switched off on the device). Android
+  /// decides, so callers must show the result instead of assuming it worked.
+  static Future<String> startLockTask() async =>
+      (await _invoke<Map<Object?, Object?>>('startLockTask'))?['state']
+          as String? ??
+      'none';
+
+  /// Leaves lock task mode again and reports the resulting state.
+  static Future<String> stopLockTask() async =>
+      (await _invoke<Map<Object?, Object?>>('stopLockTask'))?['state']
+          as String? ??
+      'none';
+
+  /// The current lock task state, without changing it.
+  static Future<String> lockTaskState() async =>
+      (await _invoke<Map<Object?, Object?>>('lockTaskState'))?['state']
+          as String? ??
+      'none';
+
+  /// 固定桌面: apply [wanted] and report what the system actually did.
+  static Future<String> syncDesktopPin({required bool wanted}) async =>
+      wanted ? startLockTask() : stopLockTask();
+
   static Future<void> clearCookies() => _invoke<void>('clearCookies');
 
   static Future<void> clearHistory() => _invoke<void>('clearHistory');

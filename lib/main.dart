@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'browser/browser_bridge.dart';
 import 'browser/browser_screen.dart';
 import 'state/app_scope.dart';
 import 'state/app_state.dart';
@@ -24,6 +26,17 @@ Future<void> main() async {
 
   final state = AppState(store: ConfigStore(directory));
   await state.load();
+
+  // 固定桌面：锁定任务不跨重启保留，所以启动时按设置再申请一次。系统是否答应由它
+  // 决定（可能弹一次确认框），失败只写日志——顶栏的图标随后会显示真实状态。
+  unawaited(
+    BrowserBridge.syncDesktopPin(wanted: state.settings.lockTaskEnabled)
+        .then((String result) {
+      if (state.settings.lockTaskEnabled && result == 'none') {
+        debugPrint('固定桌面：系统未允许锁定任务（Home 键仍可用）');
+      }
+    }),
+  );
 
   runApp(TabletBrowserApp(state: state));
 }

@@ -1,5 +1,7 @@
 package com.xstocker.tabletbrowser
 
+import android.app.ActivityManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -7,6 +9,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -160,6 +163,20 @@ class MainActivity : FlutterActivity() {
                     result.success(mapOf("ok" to true))
                 }
 
+                // 固定桌面：屏蔽 Home / 最近任务键。Android 不允许应用自己吞掉
+                // Home 键，唯一受支持的机制就是"锁定任务 / 屏幕固定"。
+                "startLockTask" -> {
+                    startLockTaskSafely()
+                    result.success(mapOf("state" to lockTaskState()))
+                }
+
+                "stopLockTask" -> {
+                    stopLockTaskSafely()
+                    result.success(mapOf("state" to lockTaskState()))
+                }
+
+                "lockTaskState" -> result.success(mapOf("state" to lockTaskState()))
+
                 "clearCache" -> {
                     bridge.clearCache()
                     bridge.clearWebStorage()
@@ -282,6 +299,40 @@ class MainActivity : FlutterActivity() {
         "canGoForward" to view.canGoForward(),
     )
 
+    /**
+     * 进入"锁定任务"（屏幕固定）：Home 与最近任务键不再响应，状态栏也被屏蔽。
+     *
+     * 决定权在系统：设备未把本应用加入 lock task 白名单时会弹一次确认框（部分机型还需
+     * 先在系统设置里打开「固定窗口」）。所以这里只尝试，并把真实状态回报给 Dart。
+     */
+    private fun startLockTaskSafely() {
+        try {
+            startLockTask()
+        } catch (t: Throwable) {
+            Log.w(TAG, "startLockTask failed", t)
+        }
+    }
+
+    /** 退出锁定任务。 */
+    private fun stopLockTaskSafely() {
+        try {
+            if (lockTaskState() != "none") stopLockTask()
+        } catch (t: Throwable) {
+            Log.w(TAG, "stopLockTask failed", t)
+        }
+    }
+
+    /** `locked`（白名单/设备所有者）/ `pinned`（系统确认后固定）/ `none`。 */
+    private fun lockTaskState(): String {
+        val manager = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+            ?: return "none"
+        return when (manager.lockTaskModeState) {
+            ActivityManager.LOCK_TASK_MODE_LOCKED -> "locked"
+            ActivityManager.LOCK_TASK_MODE_PINNED -> "pinned"
+            else -> "none"
+        }
+    }
+
     private fun viewIdOf(call: MethodCall): Int? =
         (call.argument<Any?>("viewId") as? Number)?.toInt()
 
@@ -348,6 +399,8 @@ class MainActivity : FlutterActivity() {
     }
 
     companion object {
+        private const val TAG = "MainActivity"
+
         const val VIEW_TYPE = "tablet_browser/webview"
         const val COMMANDS_CHANNEL = "tablet_browser/commands"
         const val EVENTS_CHANNEL = "tablet_browser/events"

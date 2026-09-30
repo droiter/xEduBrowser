@@ -77,6 +77,16 @@ class AppSettings {
   /// How long a watched bookmark stays locked, in minutes (kept at 1–600).
   final int antiRepeatMinutes;
 
+  /// 固定桌面：keep the tablet inside this app with Android's lock task mode
+  /// (screen pinning), so the Home and Recents keys stop responding.
+  ///
+  /// **Off by default**: it takes the whole device over (no Home key, no Recents,
+  /// no status bar), so the operator turns it on deliberately from the top bar.
+  /// Android owns the Home key, so this only *requests* the mode — when the
+  /// device refuses (pinning switched off, or the confirmation dismissed) nothing
+  /// happens and the switch says so.
+  final bool lockTaskEnabled;
+
   /// Serve `fetch()` to local pages over XHR instead of letting it fail.
   ///
   /// Chromium refuses `fetch` for `file:` URLs (XHR on the same file is fine),
@@ -113,6 +123,7 @@ class AppSettings {
     this.localFetchShim = false,
     this.antiRepeatEnabled = true,
     this.antiRepeatMinutes = 10,
+    this.lockTaskEnabled = false,
   });
 
   /// True once a parent password has been configured. While false, the gate
@@ -145,6 +156,7 @@ class AppSettings {
     bool? localFetchShim,
     bool? antiRepeatEnabled,
     int? antiRepeatMinutes,
+    bool? lockTaskEnabled,
   }) =>
       AppSettings(
         javaScript: javaScript ?? this.javaScript,
@@ -173,6 +185,7 @@ class AppSettings {
         antiRepeatEnabled: antiRepeatEnabled ?? this.antiRepeatEnabled,
         antiRepeatMinutes:
             (antiRepeatMinutes ?? this.antiRepeatMinutes).clamp(1, 600),
+        lockTaskEnabled: lockTaskEnabled ?? this.lockTaskEnabled,
       );
 
   Map<String, dynamic> toJson() => {
@@ -200,6 +213,7 @@ class AppSettings {
         'localFetchShim': localFetchShim,
         'antiRepeatEnabled': antiRepeatEnabled,
         'antiRepeatMinutes': antiRepeatMinutes,
+        'lockTaskEnabled': lockTaskEnabled,
       };
 
   /// The subset the native side consumes for the WebView.
@@ -247,6 +261,8 @@ class AppSettings {
         antiRepeatEnabled: json['antiRepeatEnabled'] as bool? ?? true,
         antiRepeatMinutes:
             ((json['antiRepeatMinutes'] as num?)?.toInt() ?? 10).clamp(1, 600),
+        // 固定桌面 缺省关闭：旧配置文件没有这个键时也关闭。
+        lockTaskEnabled: json['lockTaskEnabled'] as bool? ?? false,
       );
 }
 

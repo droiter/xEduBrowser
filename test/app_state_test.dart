@@ -45,6 +45,17 @@ void main() {
       expect((await store.loadPolicy()).rules, isEmpty);
     });
 
+    test('固定桌面 缺省关闭，且能落盘', () async {
+      expect(const AppSettings().lockTaskEnabled, isFalse);
+      // 旧配置文件没有这个键时也保持关闭。
+      expect(AppSettings.fromJson(const <String, dynamic>{}).lockTaskEnabled, isFalse);
+
+      await store.saveSettings(const AppSettings(lockTaskEnabled: true));
+      expect((await store.loadSettings()).lockTaskEnabled, isTrue);
+      await store.saveSettings(const AppSettings());
+      expect((await store.loadSettings()).lockTaskEnabled, isFalse);
+    });
+
     test('round trips settings', () async {
       const settings = AppSettings(
         javaScript: false,

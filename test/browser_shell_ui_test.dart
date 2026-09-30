@@ -239,6 +239,102 @@ void main() {
     );
   });
 
+  testWidgets('固定桌面：图标与「+」「⋮」同一排，缺省关闭，点一下开启', (tester) async {
+    final List<MethodCall> lockCalls = <MethodCall>[];
+    // 原生那边的真实状态：由这份 mock 记着，switch 只反映它。
+    String platformState = 'none';
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+      const MethodChannel('tablet_browser/commands'),
+      (MethodCall call) async {
+        switch (call.method) {
+          case 'lockTaskState':
+            lockCalls.add(call);
+            return <String, dynamic>{'state': platformState};
+          case 'startLockTask':
+            lockCalls.add(call);
+            platformState = 'pinned';
+            return <String, dynamic>{'state': platformState};
+          case 'stopLockTask':
+            lockCalls.add(call);
+            platformState = 'none';
+            return <String, dynamic>{'state': platformState};
+        }
+        return null;
+      },
+    );
+
+    await pumpShell(tester);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+    await tester.pumpAndSettle();
+
+    // 缺省不开启：设置里是关的，图标也是空心。
+    expect(state.settings.lockTaskEnabled, isFalse);
+    final Icon pinIcon = tester.widget<Icon>(
+      find.descendant(
+        of: find.byKey(lockTaskToggleKey),
+        matching: find.byType(Icon),
+      ),
+    );
+    expect(pinIcon.icon, Icons.push_pin_outlined);
+
+    // 与「+」「⋮」同一排：三者中心同一水平线，且它在「+」左边。
+    final Finder pin = find.byKey(lockTaskToggleKey);
+    final Finder add = find.byTooltip('新建标签页');
+    final Finder menu = find.byTooltip('菜单');
+    expect(pin, findsOneWidget);
+    expect(add, findsOneWidget);
+    expect(menu, findsOneWidget);
+    final double pinY = tester.getCenter(pin).dy;
+    expect(pinY, tester.getCenter(add).dy);
+    expect(pinY, tester.getCenter(menu).dy);
+    expect(tester.getCenter(pin).dx, lessThan(tester.getCenter(add).dx));
+
+    // 点一下：走原生 startLockTask，设置变成开启，图标转实心。
+    await tester.tap(pin);
+    await tester.pumpAndSettle();
+    await waitFor(tester, () => state.settings.lockTaskEnabled == true);
+    expect(
+      lockCalls.map((MethodCall call) => call.method),
+      contains('startLockTask'),
+    );
+    await waitFor(
+      tester,
+      () => find.textContaining('固定桌面已开启').evaluate().isNotEmpty,
+    );
+    expect(
+      tester
+          .widget<Icon>(find.descendant(
+            of: find.byKey(lockTaskToggleKey),
+            matching: find.byType(Icon),
+          ))
+          .icon,
+      Icons.push_pin,
+    );
+
+    // 再点一下：解除固定。
+    await tester.tap(pin);
+    await tester.pumpAndSettle();
+    await waitFor(tester, () => state.settings.lockTaskEnabled == false);
+    expect(
+      lockCalls.map((MethodCall call) => call.method),
+      contains('stopLockTask'),
+    );
+    await waitFor(
+      tester,
+      () => find.textContaining('已解除固定桌面').evaluate().isNotEmpty,
+    );
+    expect(
+      tester
+          .widget<Icon>(find.descendant(
+            of: find.byKey(lockTaskToggleKey),
+            matching: find.byType(Icon),
+          ))
+          .icon,
+      Icons.push_pin_outlined,
+    );
+  });
+
   testWidgets('back on the start page leaves the app alone', (tester) async {
     await pumpShell(tester);
 

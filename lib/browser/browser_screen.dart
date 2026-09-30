@@ -64,12 +64,19 @@ class BrowserScreen extends StatefulWidget {
   State<BrowserScreen> createState() => _BrowserScreenState();
 }
 
+/// Test hook for 固定桌面's top-bar switch.
+const Key lockTaskToggleKey = ValueKey<String>('lock-task-toggle');
+
 class _BrowserScreenState extends State<BrowserScreen> {
   final List<BrowserTab> _tabs = [];
   StreamSubscription<BrowserEvent>? _eventSubscription;
   AppState? _state;
   bool _wired = false;
   int _activeIndex = 0;
+
+  /// 固定桌面 是否真的生效了（系统的真实状态，由 [BrowserBridge.lockTaskState]
+  /// 与每次切换后的回报决定；"设置里想要"不等于"系统答应了"）。
+  bool _pinned = false;
 
   /// Bookmark ids whose preview was already refreshed during this app run, so a
   /// page that reloads (or is opened twice) is not re-screenshotted every time.
@@ -112,6 +119,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _eventSubscription = BrowserBridge.eventStream()
         .map(BrowserEvent.fromMap)
         .listen(_onNativeEvent);
+    unawaited(_refreshPinned());
     _addTab(activate: true);
   }
 
@@ -547,6 +555,41 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _closeTab(_activeIndex);
   }
 
+  // ------------------------------------------------------- 固定桌面（LockTask）
+
+  /// Reads the platform's real lock task state. The switch reflects **that**, not
+  /// the stored wish: a device that refuses pinning must not show a filled pin.
+  Future<void> _refreshPinned() async {
+    final String result = await BrowserBridge.lockTaskState();
+    if (!mounted) return;
+    setState(() => _pinned = result != 'none');
+  }
+
+  /// Toggles 固定桌面 and remembers the wish for the next launch.
+  ///
+  /// Whatever the system answers is reported: entering lock task is the device's
+  /// call (it may ask for confirmation, or refuse when pinning is switched off in
+  /// Settings), and pretending otherwise would leave a parent thinking the Home
+  /// key is blocked when it is not.
+  Future<void> _togglePinned() async {
+    final state = _state;
+    final bool want = !_pinned;
+    final String result = await BrowserBridge.syncDesktopPin(wanted: want);
+    if (!mounted) return;
+    setState(() => _pinned = result != 'none');
+    if (state != null) {
+      await state.updateSettings(state.settings.copyWith(lockTaskEnabled: want));
+    }
+    if (!mounted) return;
+    if (want && result == 'none') {
+      _snack('系统没有允许固定桌面：请在系统设置里开启「固定窗口」，或在下一次弹框时确认');
+    } else if (result == 'none') {
+      _snack('已解除固定桌面');
+    } else {
+      _snack('固定桌面已开启：Home 与最近任务键不再响应（按住「返回 + 最近任务」可解除）');
+    }
+  }
+
   // --------------------------------------------------------- top-bar 后退
 
   /// The ⟵ button: page history first, then the wall.
@@ -594,6 +637,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 onSelect: _selectTab,
                 onClose: _closeTab,
                 onAddTab: () => _addTab(activate: true),
+                pinned: _pinned,
+                onTogglePinned: _togglePinned,
                 onBack: _handleBackButton,
                 onForward: () => tab?.controller.goForward(),
                 onReload: () {
@@ -705,6 +750,8 @@ class _BrowserTopBar extends StatelessWidget {
     required this.onSelect,
     required this.onClose,
     required this.onAddTab,
+    required this.pinned,
+    required this.onTogglePinned,
     required this.onBack,
     required this.onForward,
     required this.onReload,
@@ -723,6 +770,12 @@ class _BrowserTopBar extends StatelessWidget {
   final ValueChanged<int> onSelect;
   final ValueChanged<int> onClose;
   final VoidCallback onAddTab;
+
+  /// 固定桌面 当前是否生效（系统的真实状态，不是"想不想要"）。
+  final bool pinned;
+
+  /// 切换「固定桌面」。
+  final VoidCallback onTogglePinned;
   final VoidCallback onBack;
   final VoidCallback onForward;
   final VoidCallback onReload;
@@ -847,6 +900,18 @@ class _BrowserTopBar extends StatelessWidget {
                   ),
                 );
               },
+            ),
+          ),
+          // 固定桌面：与「+」「⋮」同一排。图标反映系统的真实状态：固定中为实心图钉。
+          IconButton(
+            key: lockTaskToggleKey,
+            tooltip: pinned ? '固定桌面：已固定（点一下解除）' : '固定桌面（屏蔽 Home 键）',
+            visualDensity: VisualDensity.compact,
+            onPressed: onTogglePinned,
+            icon: Icon(
+              pinned ? Icons.push_pin : Icons.push_pin_outlined,
+              size: 20,
+              color: pinned ? theme.colorScheme.primary : null,
             ),
           ),
           IconButton(
