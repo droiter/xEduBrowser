@@ -963,4 +963,51 @@ void main() {
     expect(find.byKey(parentalPromptPasswordKey), findsNothing);
     await waitFor(tester, () => state.settings.flipGuardEnabled == true);
   });
+
+  testWidgets('防翻页：在设置里改，顶栏按钮跟着变（不能各说各话）', (tester) async {
+    await pumpShell(tester);
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 30)),
+    );
+    await tester.pumpAndSettle();
+
+    IconData? guardIcon() => tester
+        .widget<Icon>(find.descendant(
+          of: find.byKey(flipGuardToggleKey),
+          matching: find.byType(Icon),
+        ))
+        .icon;
+
+    expect(state.settings.flipGuardEnabled, isFalse);
+    expect(guardIcon(), Icons.lock_open_outlined);
+
+    // The same switch also lives in 设置 →「书签默认行为」; flipping it there must
+    // not leave the toolbar showing the state it had at startup.
+    await tester.runAsync(() async {
+      await state.updateSettings(
+        state.settings.copyWith(flipGuardEnabled: true, flipGuardSeconds: 10),
+      );
+    });
+    await tester.pumpAndSettle();
+    expect(guardIcon(), Icons.lock_clock);
+    expect(find.byTooltip('防翻页：已开启（点一下关闭）'), findsOneWidget);
+
+    // Switching it off again stops any countdown that was running.
+    await sendNativeEvent(tester, <String, dynamic>{
+      'type': 'consoleMessage',
+      'viewId': activeViewId(),
+      'message': '[flipguard] cool 30000ms swipe',
+      'level': 'LOG',
+      'source': '',
+      'line': 0,
+    });
+    await tester.runAsync(() async {
+      await state.updateSettings(
+        state.settings.copyWith(flipGuardEnabled: false),
+      );
+    });
+    await tester.pumpAndSettle();
+    expect(guardIcon(), Icons.lock_open_outlined);
+    expect(find.byKey(flipGuardCountdownKey), findsNothing);
+  });
 }

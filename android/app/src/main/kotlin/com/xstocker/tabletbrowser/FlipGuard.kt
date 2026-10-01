@@ -107,6 +107,16 @@ internal object FlipGuard {
     fun cooldownSnippet(seconds: Int): String =
         "(function(){var g=window.__dshFlipGuard;if(g&&g.setCooldown)g.setCooldown(${seconds.coerceIn(1, 600) * 1000});})()"
 
+    /**
+     * Switches a guard that is **already running in the loaded document** on or
+     * off, so the toolbar switch takes effect on the page the child is looking at
+     * instead of only after the next navigation. Harmless when the script never
+     * ran there.
+     */
+    @JvmStatic
+    fun enableSnippet(on: Boolean): String =
+        "(function(){var g=window.__dshFlipGuard;if(g&&g.setEnabled)g.setEnabled($on);})()"
+
     private const val TAG = "FlipGuard"
 
     /**
@@ -136,6 +146,9 @@ internal object FlipGuard {
     return;
   }
 
+  // Switched from the host: turning the guard off has to take effect in the page
+  // that is already open, not only in the next document.
+  var enabled = true;
   var coolingUntil = 0;
   var latchUntil = 0;
   var coolTimer = null;
@@ -225,6 +238,7 @@ internal object FlipGuard {
   function host() { return document.documentElement || document.body; }
 
   function block(e) {
+    if (!enabled) { return; }
     var t = e.type;
     if (passThrough) {
       // The gesture that *caused* the turn is still in flight: a drag-to-turn
@@ -337,6 +351,7 @@ internal object FlipGuard {
   }
 
   function startCooling(reason, spanMs) {
+    if (!enabled) { return; }
     if (editableFocused()) { return; }
     var span = spanMs || CFG.cooldownMs;
     lastReason = reason;
@@ -376,6 +391,7 @@ internal object FlipGuard {
   // --- detection -----------------------------------------------------------
 
   function onMutation(records) {
+    if (!enabled) { return; }
     if (editableFocused()) { return; }
     if (cooling() && !provisional) { return; }
     for (var i = 0; i < records.length; i++) {
@@ -400,6 +416,7 @@ internal object FlipGuard {
   var lastScroll = -1;
 
   function onScroll() {
+    if (!enabled) { return; }
     var moved = Math.abs(window.scrollY || 0) + Math.abs(window.scrollX || 0);
     if (lastScroll < 0) { lastScroll = moved; return; }
     var delta = Math.abs(moved - lastScroll);
@@ -412,6 +429,7 @@ internal object FlipGuard {
   }
 
   function onHash() {
+    if (!enabled) { return; }
     confirm('hash');
   }
 
@@ -424,7 +442,7 @@ internal object FlipGuard {
   }
 
   function onDown(e) {
-    if (cooling()) { return; }
+    if (!enabled || cooling()) { return; }
     if (gestureKind === null) {
       var t = e.type;
       gestureKind = (t.indexOf('touch') === 0 || e.pointerType === 'touch') ? 'touch' : 'mouse';
@@ -439,7 +457,7 @@ internal object FlipGuard {
   }
 
   function onMove(e) {
-    if (cooling() || !start) { return; }
+    if (!enabled || cooling() || !start) { return; }
     var p = pointOf(e);
     var dx = p.x - start.x;
     var dy = p.y - start.y;
@@ -448,7 +466,7 @@ internal object FlipGuard {
   }
 
   function onUp(e) {
-    if (cooling()) { return; }
+    if (!enabled || cooling()) { return; }
     var p = pointOf(e);
     var s = start;
     start = null;
@@ -470,7 +488,7 @@ internal object FlipGuard {
   }
 
   function onKey(e) {
-    if (cooling()) { return; }
+    if (!enabled || cooling()) { return; }
     var k = e.key || '';
     if (k === 'PageUp' || k === 'PageDown' || k === 'Home' || k === 'End') { confirm('page-key'); return; }
     if (k === 'ArrowLeft' || k === 'ArrowRight' || k === ' ' || k === 'Enter') { latch(); }
@@ -519,6 +537,28 @@ internal object FlipGuard {
     lastReason: function () { return lastReason; },
     remainingMs: function () { return Math.max(0, coolingUntil - Date.now()); },
     setCooldown: function (ms) { CFG.cooldownMs = ms; },
+    enabled: function () { return enabled; },
+    setEnabled: function (on) {
+      var want = on !== false;
+      if (want === enabled) { return; }
+      enabled = want;
+      if (!enabled) {
+        // Let go of everything at once: a page that keeps blocking after the
+        // switch was turned off looks like a broken page.
+        coolingUntil = 0;
+        latchUntil = 0;
+        provisional = false;
+        passThrough = false;
+        gestureInFlight = false;
+        if (coolTimer !== null) { clearTimeout(coolTimer); coolTimer = null; }
+        if (ensureTimer !== null) { clearInterval(ensureTimer); ensureTimer = null; }
+        armMask(false);
+        hideChip();
+        say('disabled');
+      } else {
+        say('enabled');
+      }
+    },
     turn: function (reason) { startCooling(reason || 'manual'); },
     config: CFG
   };

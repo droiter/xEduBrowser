@@ -374,6 +374,14 @@ class PolicyWebView(
     private var flipGuardHandler: ScriptHandler? = null
     private var flipGuardSecondsInstalled: Int? = null
 
+    /**
+     * The cool-down the *loaded document* is running with, or null when the guard
+     * is not live there. The script is injected before a document is parsed, so
+     * without this a page that was already open when the operator flipped the
+     * switch kept turning pages freely — the switch looked on and did nothing.
+     */
+    private var flipGuardLiveSeconds: Int? = null
+
     init {
         webView.settings.applyPolicySettings(settings, defaultUserAgent)
         applyFetchShim()
@@ -505,21 +513,34 @@ class PolicyWebView(
             flipGuardHandler?.remove()
             flipGuardHandler = null
             flipGuardSecondsInstalled = null
+            // Switching off has to reach the page that is already open too.
+            if (flipGuardLiveSeconds != null) {
+                evaluate(FlipGuard.enableSnippet(false), "flip guard could not be switched off")
+                flipGuardLiveSeconds = null
+            }
             return
         }
         val seconds = settings.flipGuardSeconds.coerceIn(1, 600)
-        if (flipGuardHandler != null && flipGuardSecondsInstalled == seconds) return
-        if (flipGuardSecondsInstalled != null && flipGuardHandler != null) {
-            // Same document, new duration: patch it in place first.
-            try {
-                webView.evaluateJavascript(FlipGuard.cooldownSnippet(seconds), null)
-            } catch (t: Throwable) {
-                Log.w(TAG, "flip guard cool-down update failed for view $viewId", t)
-            }
+        if (flipGuardLiveSeconds != seconds) {
+            // The loaded document first (idempotent: the script re-runs as a
+            // no-op that only retunes the cool-down), then the handler for
+            // documents that have not been parsed yet.
+            evaluate(FlipGuard.scriptFor(seconds), "flip guard could not be injected")
+            flipGuardLiveSeconds = seconds
         }
+        if (flipGuardHandler != null && flipGuardSecondsInstalled == seconds) return
         flipGuardHandler?.remove()
         flipGuardHandler = FlipGuard.install(webView, seconds)
         flipGuardSecondsInstalled = if (flipGuardHandler != null) seconds else null
+    }
+
+    /** `evaluateJavascript` with the error handling every caller here wants. */
+    private fun evaluate(script: String, what: String) {
+        try {
+            webView.evaluateJavascript(script, null)
+        } catch (t: Throwable) {
+            Log.w(TAG, "$what (view $viewId)", t)
+        }
     }
 
     fun clearCache() {

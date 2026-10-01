@@ -138,6 +138,30 @@ class FlipGuardTest {
     }
 
     @Test
+    fun `the guard can be switched off inside a loaded document`() {
+        val script = FlipGuard.scriptFor(5)
+        // The toolbar switch has to reach the page the child is already looking
+        // at — a document parsed before the switch was flipped has no other way
+        // to learn about it.
+        assertTrue(script.contains("var enabled = true"))
+        assertTrue(script.contains("setEnabled: function (on)"))
+        assertTrue(script.contains("say('disabled')"))
+        assertTrue(script.contains("say('enabled')"))
+        // Switching off must let go of everything at once.
+        assertTrue(script.contains("armMask(false)"))
+        assertTrue(script.contains("hideChip()"))
+        // …and the detectors must stay quiet while it is off.
+        assertTrue(script.contains("if (!enabled) { return; }"))
+        assertTrue(script.contains("if (!enabled || cooling()) { return; }"))
+
+        assertEquals(
+            "(function(){var g=window.__dshFlipGuard;if(g&&g.setEnabled)g.setEnabled(false);})()",
+            FlipGuard.enableSnippet(false),
+        )
+        assertTrue(FlipGuard.enableSnippet(true).contains("setEnabled(true)"))
+    }
+
+    @Test
     fun `retuning a loaded document only calls setCooldown`() {
         val snippet = FlipGuard.cooldownSnippet(5)
         assertTrue(snippet.contains("__dshFlipGuard"))

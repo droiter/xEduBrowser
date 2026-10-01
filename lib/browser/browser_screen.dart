@@ -133,7 +133,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     final state = AppScope.of(context);
-    if (_wired) return;
+    if (_wired) {
+      _syncSwitchesFromSettings();
+      return;
+    }
     _wired = true;
     _state = state;
 
@@ -154,6 +157,25 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _flipGuardWanted = _state?.settings.flipGuardEnabled ?? false;
     unawaited(_refreshPinActive());
     _addTab(activate: true);
+  }
+
+  /// Re-reads the two switches from the settings on every notification.
+  ///
+  /// They are also settable from 设置 →「书签默认行为」, and the toolbar is the
+  /// child-facing mirror of that: a button that keeps showing the state it had
+  /// when the app started is how a switch ends up looking on while the setting
+  /// behind it says otherwise.
+  void _syncSwitchesFromSettings() {
+    final AppSettings? settings = _state?.settings;
+    if (settings == null) return;
+    // No setState: didChangeDependencies is always followed by a build.
+    if (_pinWanted != settings.lockTaskEnabled) {
+      _pinWanted = settings.lockTaskEnabled;
+    }
+    if (_flipGuardWanted != settings.flipGuardEnabled) {
+      _flipGuardWanted = settings.flipGuardEnabled;
+      if (!_flipGuardWanted) _endGuardHold();
+    }
   }
 
   @override
@@ -658,7 +680,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
     // was switched off; the switch is the authority, so ignore it then.
     if (!_flipGuardWanted) return;
     final String rest = event.message.substring(prefix.length).trim();
-    if (rest == 'release') {
+    if (rest == 'release' || rest == 'disabled') {
+      // 'disabled' means the host switched the guard off in this very document;
+      // a countdown left running after that would be a lie.
       _endGuardHold();
       return;
     }
