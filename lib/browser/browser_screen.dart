@@ -852,13 +852,16 @@ class _BrowserScreenState extends State<BrowserScreen> {
   /// back, it says so.
   Future<void> _togglePinned() async {
     final state = _state;
-    // 固定桌面 会给整台设备上锁，所以先问密码。
-    final bool allowed = await _confirmParent(
-      '固定桌面',
-      '固定桌面会屏蔽 Home 与最近任务键，把平板固定在本应用里；开关需要家长密码。',
+    final bool want = !_pinWanted;
+    // 跟另外两个保护开关同一条规则：打开不用密码（只是把平板锁得更紧，随时能再关），
+    // 关闭要家长密码——那一下才是"放孩子出去"。
+    final bool allowed = await _confirmSwitch(
+      '关闭固定桌面',
+      '关闭固定桌面需要家长密码（打开不需要）。关掉之后 Home 与最近任务键会恢复，'
+          '孩子可以离开本应用。',
+      turningOn: want,
     );
     if (!allowed) return;
-    final bool want = !_pinWanted;
     setState(() => _pinWanted = want);
     // 先落一份"想要的状态"（不阻塞下面真正的动作：写盘是真实 I/O，会慢一拍），
     // 然后立刻去请求系统——按钮的反馈不该排在磁盘后面。
@@ -1307,11 +1310,11 @@ class _BrowserTopBar extends StatelessWidget {
             key: lockTaskToggleKey,
             tooltip: pinWanted
                 ? (pinActive
-                    ? '固定桌面：已固定（点一下解除）'
-                    : '固定桌面：已开启，但系统还没固定（点一下关闭）')
+                    ? '固定桌面：已固定（点一下需要家长密码）'
+                    : '固定桌面：已开启，但系统还没固定（点一下需要家长密码）')
                 : (pinActive
-                    ? '固定桌面：已关闭，但系统仍在固定（点一下开启）'
-                    : '固定桌面：未固定（点一下开启，屏蔽 Home 键）'),
+                    ? '固定桌面：已关闭，但系统仍在固定（点一下开启，不用密码）'
+                    : '固定桌面：未固定（点一下开启，不用密码；屏蔽 Home 键）'),
             visualDensity: VisualDensity.compact,
             onPressed: onTogglePinned,
             icon: Icon(

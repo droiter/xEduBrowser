@@ -967,7 +967,7 @@ void main() {
     );
   });
 
-  testWidgets('固定桌面：仍然两个方向都要密码', (tester) async {
+  testWidgets('固定桌面：打开免密、关闭要密码（跟另外两个开关同规则）', (tester) async {
     List<String> lockMethods() => commandCalls
         .where((MethodCall call) =>
             call.method == 'startLockTask' || call.method == 'stopLockTask')
@@ -990,26 +990,44 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // 固定桌面 会把整台设备锁住，所以连"打开"也照旧问密码（这条规则没变）。
+    // 未固定 → 点一下就是"打开"：不问密码，直接请求固定。
+    expect(state.settings.lockTaskEnabled, isFalse);
+    await tester.tap(find.byKey(lockTaskToggleKey));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(parentalPromptPasswordKey),
+      findsNothing,
+      reason: '打开固定桌面不该要密码',
+    );
+    await waitFor(tester, () => state.settings.lockTaskEnabled == true);
+    expect(lockMethods(), contains('startLockTask'));
+
+    // 已固定（意图）→ 这一下是"关闭"：必须过密码，取消则保持固定。
     await tester.tap(find.byKey(lockTaskToggleKey));
     await tester.pumpAndSettle();
     expect(find.byKey(parentalPromptPasswordKey), findsOneWidget);
-    expect(state.settings.lockTaskEnabled, isFalse);
-    expect(lockMethods(), isNot(contains('startLockTask')));
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(state.settings.lockTaskEnabled, isTrue, reason: '取消不能解除固定');
+    expect(lockMethods(), isNot(contains('stopLockTask')));
 
+    // 输错也不行。
+    await tester.tap(find.byKey(lockTaskToggleKey));
+    await tester.pumpAndSettle();
     await tester.enterText(find.byKey(parentalPromptPasswordKey), '0000');
     await tester.tap(find.text('确认'));
     await tester.pumpAndSettle();
-    expect(state.settings.lockTaskEnabled, isFalse);
+    expect(state.settings.lockTaskEnabled, isTrue);
 
+    // 输对才解除。
     await tester.enterText(find.byKey(parentalPromptPasswordKey), '2468');
     await tester.tap(find.text('确认'));
     await tester.pumpAndSettle();
-    await waitFor(tester, () => state.settings.lockTaskEnabled == true);
-    expect(lockMethods(), contains('startLockTask'));
+    await waitFor(tester, () => state.settings.lockTaskEnabled == false);
+    expect(lockMethods(), contains('stopLockTask'));
   });
 
-  testWidgets('家长验证整个关掉时，两个开关不再问密码', (tester) async {
+  testWidgets('家长验证整个关掉时，保护开关不再问密码', (tester) async {
     final String salt = ParentalPassword.newSalt();
     state = AppState(
       store: ConfigStore(directory),
