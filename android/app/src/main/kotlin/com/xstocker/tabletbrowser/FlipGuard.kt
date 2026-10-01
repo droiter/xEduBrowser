@@ -142,9 +142,18 @@ internal object FlipGuard {
     chipMaxMs: 4000
   };
   if (window.__dshFlipGuard) {
+    // Re-injected: the host is telling this document the guard should be on (it
+    // also uses this call to retune the cool-down). Re-enabling matters because
+    // the switch can be flipped off and on again while this very page is open —
+    // without it the page would sit there with a disabled guard while the button
+    // says 已开启, i.e. no protection at all.
     if (window.__dshFlipGuard.setCooldown) { window.__dshFlipGuard.setCooldown(CFG.cooldownMs); }
+    // setEnabled logs 'enabled' itself, and only when it really changed state, so
+    // the logcat trace reads: armed (fresh document) … disabled … enabled.
+    if (window.__dshFlipGuard.setEnabled) { window.__dshFlipGuard.setEnabled(true); }
     return;
   }
+  say('armed ' + CFG.cooldownMs + 'ms');
 
   // Switched from the host: turning the guard off has to take effect in the page
   // that is already open, not only in the next document.

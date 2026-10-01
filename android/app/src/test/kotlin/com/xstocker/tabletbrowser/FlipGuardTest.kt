@@ -138,6 +138,23 @@ class FlipGuardTest {
     }
 
     @Test
+    fun `re-injecting re-enables a guard that was switched off`() {
+        val script = FlipGuard.scriptFor(5)
+        // The operator can flip the switch off and on again while the page stays
+        // open. The second injection runs the idempotent branch, and if that only
+        // retuned the cool-down the page would keep turning freely while the
+        // button said 已开启 — the reported bug.
+        val idempotent = script.substringAfter("if (window.__dshFlipGuard) {").substringBefore("return;")
+        assertTrue(idempotent.contains("setCooldown"))
+        assertTrue(
+            "re-injection must switch the guard back on",
+            idempotent.contains("setEnabled") && idempotent.contains("setEnabled(true)"),
+        )
+        // …and a fresh document says so, so support can see the guard is present.
+        assertTrue(script.contains("say('armed '"))
+    }
+
+    @Test
     fun `the guard can be switched off inside a loaded document`() {
         val script = FlipGuard.scriptFor(5)
         // The toolbar switch has to reach the page the child is already looking
