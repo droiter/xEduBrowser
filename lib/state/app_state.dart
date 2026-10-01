@@ -122,11 +122,16 @@ class AppSettings {
   /// few hundred ms, which is why "any big DOM change" is *not* enough on its
   /// own: with the picture/area test a quiz screen does not trip the guard.
   ///
-  /// **On by default**: it is the whole point of a kids' reader, and the lock is
-  /// short ([flipGuardSeconds], 2 s) so a false positive costs one tap.
+  /// **Off by default** and switched from the top bar (next to 固定桌面), because
+  /// it changes how every page responds to touch — the operator turns it on for
+  /// a reading session, not for the whole device. It is not a lock-out: the
+  /// child can still watch, only page-turning is paced.
   final bool flipGuardEnabled;
 
   /// How long a detected turn blocks input, in seconds (kept at 1–600).
+  ///
+  /// Ten seconds by default: long enough that flicking through a picture book
+  /// is not fun, short enough that a page still feels reachable.
   final int flipGuardSeconds;
 
   const AppSettings({
@@ -154,8 +159,8 @@ class AppSettings {
     this.antiRepeatEnabled = true,
     this.antiRepeatMinutes = 10,
     this.lockTaskEnabled = false,
-    this.flipGuardEnabled = true,
-    this.flipGuardSeconds = 2,
+    this.flipGuardEnabled = false,
+    this.flipGuardSeconds = 10,
   });
 
   /// True once a parent password has been configured. While false, the gate
@@ -304,10 +309,11 @@ class AppSettings {
             ((json['antiRepeatMinutes'] as num?)?.toInt() ?? 10).clamp(1, 600),
         // 固定桌面 缺省关闭：旧配置文件没有这个键时也关闭。
         lockTaskEnabled: json['lockTaskEnabled'] as bool? ?? false,
-        // 防翻页 跟 防反复看 一样是给孩子用的默认行为：旧配置文件也保持开启、2 秒。
-        flipGuardEnabled: json['flipGuardEnabled'] as bool? ?? true,
+        // 防翻页 缺省关闭（顶栏一键开关），冷却 10 秒：旧配置文件没有这两个键时
+        // 也不能突然开始拦截孩子的翻页。
+        flipGuardEnabled: json['flipGuardEnabled'] as bool? ?? false,
         flipGuardSeconds:
-            ((json['flipGuardSeconds'] as num?)?.toInt() ?? 2).clamp(1, 600),
+            ((json['flipGuardSeconds'] as num?)?.toInt() ?? 10).clamp(1, 600),
       );
 }
 

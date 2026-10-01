@@ -19,7 +19,8 @@ class FlipGuardTest {
     fun `defaults keep the flip guard off on the native side`() {
         val settings = WebViewSettings.fromMap(null)
         assertFalse(settings.flipGuardEnabled)
-        assertEquals(2, settings.flipGuardSeconds)
+        // 10 s: flicking through a 30 page picture book has to stop being fun.
+        assertEquals(10, settings.flipGuardSeconds)
 
         // A payload from an app version that did not know the flag: no injection.
         assertFalse(WebViewSettings.fromMap(mapOf("javaScript" to true)).flipGuardEnabled)

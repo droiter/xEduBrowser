@@ -465,14 +465,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           title: const Text('防翻页（翻过去之后先停一下）'),
           subtitle: const Text('绘本翻页后，页面上会盖一层看不见的遮罩：接下来几秒里再点、再滑、'
-              '按翻页键都不会有反应，底部会显示一个 🔒 提示，时间到自己恢复。'),
+              '按翻页键都不会有反应，屏幕顶部显示倒计时，底部显示一个 🔒 提示，时间到自己恢复。'
+              '锁住期间也不让按返回、不让回起始页。顶栏「固定桌面」旁边也有一个开关。'),
         ),
         if (settings.flipGuardEnabled) ...[
           const SizedBox(height: 6),
           _CommitTextField(
             label: '翻页后锁多久（秒）',
             value: '${settings.flipGuardSeconds}',
-            hint: '默认 2',
+            hint: '默认 10',
             keyboardType: TextInputType.number,
             inputFormatters: <TextInputFormatter>[
               FilteringTextInputFormatter.digitsOnly,
@@ -496,7 +497,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             '或者检测到横向滑动、屏幕左右边缘的点击（这两类立刻生效）。屏幕中间的按钮、'
             '打字、普通上下滚动都不会被锁，所以游戏里答题不受影响；'
             '如果绘本是用 canvas 画出来的、DOM 完全不动，就只能靠横滑和边缘点击这类手势判断。'
-            '遮罩只在本页面里生效，不会挡住应用自己的按钮；关闭开关会立刻撤销。',
+            '遮罩只在本页面里生效，不会挡住应用自己的按钮；关闭开关会立刻撤销。'
+            '缺省是**关闭**的，家长从顶栏（锁定图标）一键开启。',
           ),
         ],
       ],

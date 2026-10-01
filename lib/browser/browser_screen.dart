@@ -67,6 +67,12 @@ class BrowserScreen extends StatefulWidget {
 /// Test hook for 固定桌面's top-bar switch.
 const Key lockTaskToggleKey = ValueKey<String>('lock-task-toggle');
 
+/// Test hook for 防翻页's top-bar switch (sits next to 固定桌面).
+const Key flipGuardToggleKey = ValueKey<String>('flip-guard-toggle');
+
+/// Test hook for the countdown strip shown while 防翻页 holds the page.
+const Key flipGuardCountdownKey = ValueKey<String>('flip-guard-countdown');
+
 class _BrowserScreenState extends State<BrowserScreen> {
   final List<BrowserTab> _tabs = [];
   StreamSubscription<BrowserEvent>? _eventSubscription;
@@ -84,6 +90,23 @@ class _BrowserScreenState extends State<BrowserScreen> {
   /// 追踪锁定任务是否已经跟上意图（每 400ms 读一次，最多 6 次）。
   Timer? _pinSettleTimer;
   int _pinSettleTicks = 0;
+
+  /// 防翻页 的**意图**（设置里的值），跟 [_pinWanted] 一样按下即翻。
+  bool _flipGuardWanted = false;
+
+  /// 页面里的遮罩此刻还剩多少毫秒。由页面自己的 `[flipguard]` 控制台消息驱动
+  /// （`cool <ms> <reason>` / `release`）——那是"页面真的翻过去了"的唯一可靠来源，
+  /// 宿主看不见这件事。倒计时只是把它显示出来，真正拦输入的是页面里的遮罩；
+  /// 所以这里用"每 250ms 减一次"的本地计时（页面 `release` 一到就归零），
+  /// 而不是跟墙上时钟对表。
+  int _guardRemainingMs = 0;
+
+  /// 这一轮锁定是哪条信号触发的，已翻成中文（写进诊断日志、也进按钮提示，
+  /// 方便家长分辨"真的翻页了"还是误判）。
+  String _guardReason = '';
+
+  /// 每 250ms 重画一次倒计时；没有锁定时为空。
+  Timer? _guardTimer;
 
   /// Bookmark ids whose preview was already refreshed during this app run, so a
   /// page that reloads (or is opened twice) is not re-screenshotted every time.
@@ -127,6 +150,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
         .map(BrowserEvent.fromMap)
         .listen(_onNativeEvent);
     _pinWanted = _state?.settings.lockTaskEnabled ?? false;
+    _flipGuardWanted = _state?.settings.flipGuardEnabled ?? false;
     unawaited(_refreshPinActive());
     _addTab(activate: true);
   }
@@ -134,6 +158,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   @override
   void dispose() {
     _pinSettleTimer?.cancel();
+    _guardTimer?.cancel();
     unawaited(_eventSubscription?.cancel());
     for (final timer in _loadWatchdogs.values) {
       timer.cancel();
@@ -220,6 +245,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   Future<void> _closeTab(int index) async {
+    // Closing the last tab lands on the start page, i.e. it is one more way
+    // home, so 防翻页 holds it too.
+    if (_guardBlocksNavigation()) return;
     if (_tabs.length == 1) {
       // Never leave the app with zero tabs: reset the last one to the start page.
       _navigate(_homeUrl);
@@ -234,6 +262,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   void _selectTab(int index) {
+    // Switching to the start page is another way back to the wall.
+    if (index >= 0 && index < _tabs.length && _tabs[index].showsStartView) {
+      if (_guardBlocksNavigation()) return;
+    }
     setState(() => _activeIndex = index);
   }
 
@@ -502,6 +534,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
           _addTab(url: event.url);
         }
       case 'consoleMessage':
+        // 防翻页 narrates arming/releasing the mask on this channel; only the
+        // tab the child is looking at may drive the countdown.
+        if (tab != null && tab.viewId == _active?.viewId) {
+          _handleGuardConsole(event);
+        }
         // A page that dies inside its own script still reports a finished load,
         // so this is the only report of it — and the only clue that explains a
         // page which rendered nothing. Level filtering lives in AppState.
@@ -561,7 +598,129 @@ class _BrowserScreenState extends State<BrowserScreen> {
   /// when it was the last one.
   void _handleSystemBack() {
     if (_tabs.isEmpty) return;
+    // 防翻页: leaving the page is exactly what the hold is for.
+    if (_guardBlocksNavigation()) return;
     _closeTab(_activeIndex);
+  }
+
+  // ------------------------------------------------------------- 防翻页（FlipGuard）
+
+  /// Whether the page's mask is holding input right now.
+  bool get _guardCooling => _guardRemainingMs > 0;
+
+  /// Whole seconds left in the current hold (rounded up, so it never shows 0
+  /// while the page is still blocking).
+  int get _guardRemainingSeconds => (_guardRemainingMs / 1000).ceil();
+
+  /// One tick of the strip; how often the seconds are redrawn.
+  static const Duration _guardTick = Duration(milliseconds: 250);
+
+  /// Starts holding the page and the navigation that would leave it.
+  void _startGuardHold(int ms, String reason) {
+    setState(() {
+      _guardRemainingMs = ms;
+      _guardReason = reason;
+    });
+    _guardTimer?.cancel();
+    _guardTimer = Timer.periodic(_guardTick, (Timer timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      setState(() {
+        _guardRemainingMs -= _guardTick.inMilliseconds;
+        if (_guardRemainingMs <= 0) {
+          _guardRemainingMs = 0;
+          timer.cancel();
+          _guardTimer = null;
+        }
+      });
+    });
+  }
+
+  void _endGuardHold() {
+    _guardTimer?.cancel();
+    _guardTimer = null;
+    if (_guardRemainingMs == 0) return;
+    setState(() => _guardRemainingMs = 0);
+  }
+
+  /// Turns the page's console narration of the mask into app state.
+  ///
+  /// The script prints `[flipguard] cool <ms> <reason>` when it arms and
+  /// `[flipguard] release` when the hold ends; the 700 ms provisional window is
+  /// ignored because a countdown for it would only flicker.
+  void _handleGuardConsole(BrowserEvent event) {
+    const String prefix = '[flipguard] ';
+    if (!event.message.startsWith(prefix)) return;
+    // A page that was loaded while the switch was on can still narrate after it
+    // was switched off; the switch is the authority, so ignore it then.
+    if (!_flipGuardWanted) return;
+    final String rest = event.message.substring(prefix.length).trim();
+    if (rest == 'release') {
+      _endGuardHold();
+      return;
+    }
+    final RegExpMatch? cool = RegExp(r'^cool (\d+)ms (\S+)$').firstMatch(rest);
+    if (cool == null) return;
+    final int ms = int.tryParse(cool.group(1)!) ?? 0;
+    if (ms < 1000) return;
+    final String reason = cool.group(2)!;
+    final String label = _guardReasonLabel(reason);
+    _state?.logEvent(
+      'browser',
+      '防翻页：锁住 ${(ms / 1000).round()} 秒（触发信号：$label）',
+    );
+    _startGuardHold(ms, label);
+  }
+
+  /// The script's signal names, in the operator's language.
+  static String _guardReasonLabel(String reason) {
+    switch (reason) {
+      case 'swipe':
+        return '横向滑动';
+      case 'edge-tap':
+        return '边缘点击';
+      case 'picture-added':
+      case 'picture-removed':
+      case 'picture-src':
+        return '整屏换图';
+      case 'latch-picture':
+        return '边缘点击后换图';
+      case 'scroll-jump':
+        return '整页滚动';
+      case 'hash':
+        return '地址变化';
+      case 'page-key':
+        return '翻页键';
+      default:
+        return reason;
+    }
+  }
+
+  /// Toggles 防翻页 from the top bar and stores the choice.
+  Future<void> _toggleFlipGuard() async {
+    final state = _state;
+    final bool want = !_flipGuardWanted;
+    setState(() => _flipGuardWanted = want);
+    if (!want) _endGuardHold();
+    final int seconds = state?.settings.flipGuardSeconds ?? 10;
+    _snack(want ? '防翻页：已开启（翻页后锁 $seconds 秒）' : '防翻页：已关闭');
+    if (state == null) return;
+    await state.updateSettings(
+      state.settings.copyWith(flipGuardEnabled: want),
+    );
+  }
+
+  /// Refuses a way out of the page while the hold is running.
+  ///
+  /// 防翻页 only paces page turns, so this is deliberately narrow: it blocks
+  /// going *back* and going *home* (the two ways the child leaves the page),
+  /// and says how long is left instead of silently ignoring the press.
+  bool _guardBlocksNavigation() {
+    if (!_guardCooling) return false;
+    _snack('防翻页：还有 $_guardRemainingSeconds 秒');
+    return true;
   }
 
   // ------------------------------------------------------- 固定桌面（LockTask）
@@ -653,6 +812,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   void _handleBackButton() {
     final tab = _active;
     if (tab == null || tab.showsStartView) return;
+    if (_guardBlocksNavigation()) return;
     if (tab.canGoBack) {
       unawaited(tab.controller.goBack());
       return;
@@ -686,10 +846,18 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 tab: tab,
                 onSelect: _selectTab,
                 onClose: _closeTab,
-                onAddTab: () => _addTab(activate: true),
+                onAddTab: () {
+                  if (_guardBlocksNavigation()) return;
+                  _addTab(activate: true);
+                },
                 pinWanted: _pinWanted,
                 pinActive: _pinActive,
                 onTogglePinned: _togglePinned,
+                flipGuardWanted: _flipGuardWanted,
+                onToggleFlipGuard: _toggleFlipGuard,
+                guardCooling: _guardCooling,
+                guardRemaining: _guardRemainingSeconds,
+                guardReason: _guardReason,
                 onBack: _handleBackButton,
                 onForward: () => tab?.controller.goForward(),
                 onReload: () {
@@ -704,7 +872,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
                     _issueLoad(tab, tab.url, reset: true);
                   }
                 },
-                onHome: () => _navigate(_homeUrl),
+                onHome: () {
+                  if (_guardBlocksNavigation()) return;
+                  _navigate(_homeUrl);
+                },
                 onRefreshPreview:
                     tab != null &&
                         tab.blocked == null &&
@@ -732,6 +903,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   ),
                 ),
               ),
+              if (_guardCooling)
+                _FlipGuardCountdown(
+                  remaining: _guardRemainingSeconds,
+                  total: state.settings.flipGuardSeconds,
+                ),
               if (tab != null && tab.loading)
                 LinearProgressIndicator(
                   value: tab.progress <= 0 ? null : tab.progress / 100,
@@ -804,6 +980,11 @@ class _BrowserTopBar extends StatelessWidget {
     required this.pinWanted,
     required this.pinActive,
     required this.onTogglePinned,
+    required this.flipGuardWanted,
+    required this.onToggleFlipGuard,
+    required this.guardCooling,
+    required this.guardRemaining,
+    required this.guardReason,
     required this.onBack,
     required this.onForward,
     required this.onReload,
@@ -831,6 +1012,17 @@ class _BrowserTopBar extends StatelessWidget {
 
   /// 切换「固定桌面」。
   final VoidCallback onTogglePinned;
+
+  /// 防翻页 的开关状态（跟 [pinWanted] 一样是意图，按下即翻）。
+  final bool flipGuardWanted;
+
+  /// 切换「防翻页」。
+  final VoidCallback onToggleFlipGuard;
+
+  /// 页面正被防翻页锁着，还剩几秒、因为什么——用来提示"按了也没用"。
+  final bool guardCooling;
+  final int guardRemaining;
+  final String guardReason;
   final VoidCallback onBack;
   final VoidCallback onForward;
   final VoidCallback onReload;
@@ -857,7 +1049,7 @@ class _BrowserTopBar extends StatelessWidget {
       child: Row(
         children: [
           IconButton(
-            tooltip: '后退',
+            tooltip: guardCooling ? '防翻页：还有 $guardRemaining 秒' : '后退',
             visualDensity: VisualDensity.compact,
             onPressed: backEnabled ? onBack : null,
             icon: const Icon(Icons.arrow_back, size: 20),
@@ -878,7 +1070,7 @@ class _BrowserTopBar extends StatelessWidget {
             ),
           ),
           IconButton(
-            tooltip: '起始页',
+            tooltip: guardCooling ? '防翻页：还有 $guardRemaining 秒' : '起始页',
             visualDensity: VisualDensity.compact,
             onPressed: onHome,
             icon: const Icon(Icons.home_outlined, size: 20),
@@ -957,6 +1149,22 @@ class _BrowserTopBar extends StatelessWidget {
               },
             ),
           ),
+          // 防翻页：紧挨着固定桌面（两个都是"管孩子"的开关），与「+」「⋮」同一排。
+          IconButton(
+            key: flipGuardToggleKey,
+            tooltip: flipGuardWanted
+                ? (guardCooling
+                    ? '防翻页：已开启，正在锁（还有 $guardRemaining 秒，$guardReason）'
+                    : '防翻页：已开启（点一下关闭）')
+                : '防翻页：已关闭（点一下开启：翻页后锁几秒）',
+            visualDensity: VisualDensity.compact,
+            onPressed: onToggleFlipGuard,
+            icon: Icon(
+              flipGuardWanted ? Icons.lock_clock : Icons.lock_open_outlined,
+              size: 20,
+              color: flipGuardWanted ? theme.colorScheme.primary : null,
+            ),
+          ),
           // 固定桌面：与「+」「⋮」同一排。图标跟着**开关意图**走（按下即翻），
           // 提示里如实写出系统那边的真实状态。
           IconButton(
@@ -1029,6 +1237,58 @@ class _BrowserTopBar extends StatelessWidget {
 /// Shown instead of the WebView when the policy refused a navigation. The
 /// native layer renders its own equivalent page for refusals it detects
 /// itself (redirects, subresources, popups).
+/// The strip under the top bar while 防翻页 is holding the page.
+///
+/// It shows what is left so the child can see the page is not broken (the mask
+/// inside the page is invisible by design) — and so the parent can tell a lock
+/// apart from a page that stopped responding.
+class _FlipGuardCountdown extends StatelessWidget {
+  const _FlipGuardCountdown({required this.remaining, required this.total});
+
+  /// Whole seconds left, already rounded up.
+  final int remaining;
+
+  /// The configured hold, for the progress line.
+  final int total;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final double fraction = total <= 0
+        ? 0
+        : (remaining / total).clamp(0.0, 1.0).toDouble();
+    return Container(
+      key: flipGuardCountdownKey,
+      width: double.infinity,
+      color: theme.colorScheme.primaryContainer,
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
+      child: Row(
+        children: [
+          Icon(
+            Icons.lock_clock,
+            size: 16,
+            color: theme.colorScheme.onPrimaryContainer,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '防翻页：还有 $remaining 秒',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onPrimaryContainer,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(2),
+              child: LinearProgressIndicator(value: fraction, minHeight: 4),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _BlockedView extends StatelessWidget {
   const _BlockedView({
     required this.url,

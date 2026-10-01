@@ -69,7 +69,7 @@ data class WebViewSettings(
      */
     val flipGuardEnabled: Boolean = false,
     /** How long a detected turn blocks input, in seconds (1–600). */
-    val flipGuardSeconds: Int = 2,
+    val flipGuardSeconds: Int = 10,
 ) {
     companion object {
         @JvmStatic

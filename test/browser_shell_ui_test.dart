@@ -108,6 +108,17 @@ void main() {
     await tester.pump();
   }
 
+  /// The view id of the tab the shell is showing.
+  ///
+  /// Platform view ids are handed out by a process-wide counter, so a test that
+  /// hardcodes 1 only works when it runs alone — ask the recorded commands.
+  int activeViewId() => commandCalls
+      .map((MethodCall call) => call.arguments)
+      .whereType<Map<Object?, Object?>>()
+      .map((Map<Object?, Object?> args) => args['viewId'])
+      .whereType<int>()
+      .fold<int>(0, (int a, int b) => a > b ? a : b);
+
   /// Delivers a native event on `tablet_browser/events`, as the Android side
   /// would.
   Future<void> sendNativeEvent(
@@ -682,5 +693,169 @@ void main() {
     final int entries = state.appLog.length;
     await sendNativeEvent(tester, consoleError);
     expect(state.appLog.length, entries, reason: '同一条报错不重复记录');
+  });
+
+  testWidgets('防翻页：开关在固定桌面旁边，按下即落盘并送进 WebView', (tester) async {
+    await pumpShell(tester);
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 30)),
+    );
+    await tester.pumpAndSettle();
+
+    // 缺省关闭：设置里是关的，图标是开着的锁。
+    expect(state.settings.flipGuardEnabled, isFalse);
+    expect(state.settings.flipGuardSeconds, 10);
+    final Finder guard = find.byKey(flipGuardToggleKey);
+    expect(guard, findsOneWidget);
+    expect(
+      tester
+          .widget<Icon>(
+            find.descendant(of: guard, matching: find.byType(Icon)),
+          )
+          .icon,
+      Icons.lock_open_outlined,
+    );
+
+    // 与「固定桌面」「+」「⋮」同一排，而且紧挨着固定桌面（在它左边）。
+    final Finder pin = find.byKey(lockTaskToggleKey);
+    final Finder add = find.byTooltip('新建标签页');
+    final Finder menu = find.byTooltip('菜单');
+    final double guardY = tester.getCenter(guard).dy;
+    expect(guardY, tester.getCenter(pin).dy);
+    expect(guardY, tester.getCenter(add).dy);
+    expect(guardY, tester.getCenter(menu).dy);
+    expect(tester.getCenter(guard).dx, lessThan(tester.getCenter(pin).dx));
+    expect(
+      tester.getCenter(pin).dx - tester.getCenter(guard).dx,
+      lessThan(80),
+      reason: '两个开关要挨在一起',
+    );
+
+    // 点一下：落盘 + 立刻把新设置推给页面（原生侧据此注入/撤销遮罩）。
+    await tester.tap(guard);
+    await tester.pumpAndSettle();
+    await waitFor(tester, () => state.settings.flipGuardEnabled == true);
+    expect(
+      tester
+          .widget<Icon>(
+            find.descendant(of: guard, matching: find.byType(Icon)),
+          )
+          .icon,
+      Icons.lock_clock,
+    );
+    final MethodCall pushed = commandCalls.lastWhere(
+      (MethodCall call) => call.method == 'updateSettings',
+    );
+    final Map<Object?, Object?> sent =
+        (pushed.arguments as Map<Object?, Object?>)['settings'] as Map<Object?, Object?>;
+    expect(sent['flipGuardEnabled'], isTrue);
+    expect(sent['flipGuardSeconds'], 10);
+
+    // 再点一下：关闭。
+    await tester.tap(guard);
+    await tester.pumpAndSettle();
+    await waitFor(tester, () => state.settings.flipGuardEnabled == false);
+  });
+
+  testWidgets('防翻页：锁住时顶部有倒计时，返回与起始页都按不动', (tester) async {
+    await tester.runAsync(() async {
+      await state.addBookmark(url: 'https://school.test/lessons', title: '课程平台');
+      await state.updateSettings(
+        state.settings.copyWith(flipGuardEnabled: true, flipGuardSeconds: 10),
+      );
+    });
+    await pumpShell(tester);
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 30)),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('课程平台'));
+    await tester.pumpAndSettle();
+    expect(find.byType(PolicyWebView), findsOneWidget);
+    expect(find.byKey(flipGuardCountdownKey), findsNothing);
+
+    // The page's mask reports that it armed: that is what starts the countdown.
+    await sendNativeEvent(tester, <String, dynamic>{
+      'type': 'consoleMessage',
+      'viewId': activeViewId(),
+      'message': '[flipguard] cool 10000ms swipe',
+      'level': 'LOG',
+      'source': '',
+      'line': 0,
+    });
+    expect(find.byKey(flipGuardCountdownKey), findsOneWidget);
+    expect(find.textContaining('防翻页：还有'), findsOneWidget);
+    expect(
+      state.appLog.any((entry) => entry.message.contains('触发信号：横向滑动')),
+      isTrue,
+      reason: '诊断日志要写明是哪条信号触发的',
+    );
+
+    // It ticks down: 1 s later the number is smaller.
+    await tester.pump(const Duration(seconds: 1));
+    final String shown = tester
+        .widget<Text>(find.textContaining('防翻页：还有'))
+        .data!;
+    expect(shown, isNot(contains('还有 10 秒')));
+
+    // Even the tooltip says the way out is held.
+    expect(
+      find.byWidgetPredicate(
+        (Widget widget) =>
+            widget is Tooltip &&
+            (widget.message ?? '').contains('防翻页：还有'),
+      ),
+      findsWidgets,
+    );
+
+    // Back does not close the tab, and 起始页 does not go home.
+    final Finder home = find.widgetWithIcon(IconButton, Icons.home_outlined);
+    await pressSystemBack(tester);
+    expect(find.byType(PolicyWebView), findsOneWidget);
+    expect(find.byKey(flipGuardCountdownKey), findsOneWidget);
+    await tester.tap(home);
+    await tester.pumpAndSettle();
+    expect(find.byType(PolicyWebView), findsOneWidget);
+    expect(find.byType(StartView), findsNothing);
+    expect(find.textContaining('防翻页：还有'), findsWidgets,
+        reason: '按了要说明还剩几秒，而不是默默无反应');
+
+    // The mask releases: the strip goes away and the ways out work again.
+    await sendNativeEvent(tester, <String, dynamic>{
+      'type': 'consoleMessage',
+      'viewId': activeViewId(),
+      'message': '[flipguard] release',
+      'level': 'LOG',
+      'source': '',
+      'line': 0,
+    });
+    expect(find.byKey(flipGuardCountdownKey), findsNothing);
+    expect(find.byTooltip('起始页'), findsOneWidget);
+    await tester.tap(find.widgetWithIcon(IconButton, Icons.home_outlined));
+    await tester.pumpAndSettle();
+    expect(find.byType(StartView), findsOneWidget);
+  });
+
+  testWidgets('防翻页：关着的时候完全不管导航', (tester) async {
+    await tester.runAsync(() async {
+      await state.addBookmark(url: 'https://school.test/lessons', title: '课程平台');
+    });
+    await pumpShell(tester);
+    await tester.tap(find.text('课程平台'));
+    await tester.pumpAndSettle();
+
+    // A guard message from a page must be ignored while the switch is off.
+    await sendNativeEvent(tester, <String, dynamic>{
+      'type': 'consoleMessage',
+      'viewId': activeViewId(),
+      'message': '[flipguard] cool 10000ms swipe',
+      'level': 'LOG',
+      'source': '',
+      'line': 0,
+    });
+    await tester.tap(find.widgetWithIcon(IconButton, Icons.home_outlined));
+    await tester.pumpAndSettle();
+    expect(find.byType(StartView), findsOneWidget);
   });
 }
