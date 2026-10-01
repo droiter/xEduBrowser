@@ -71,7 +71,11 @@ const Key lockTaskToggleKey = ValueKey<String>('lock-task-toggle');
 /// Test hook for 防翻页's top-bar switch (sits next to 固定桌面).
 const Key flipGuardToggleKey = ValueKey<String>('flip-guard-toggle');
 
-/// Test hook for the countdown strip shown while 防翻页 holds the page.
+/// Test hook for 防反复看's top-bar switch (next to 防翻页).
+const Key antiRepeatToggleKey = ValueKey<String>('anti-repeat-toggle');
+
+/// Test hook for the seconds badge 防翻页 shows **inside the top bar** while it
+/// holds the page (it used to be a strip under the bar, which cost page space).
 const Key flipGuardCountdownKey = ValueKey<String>('flip-guard-countdown');
 
 class _BrowserScreenState extends State<BrowserScreen> {
@@ -94,6 +98,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
 
   /// 防翻页 的**意图**（设置里的值），跟 [_pinWanted] 一样按下即翻。
   bool _flipGuardWanted = false;
+
+  /// 防反复看 的开关（同一排的第三个按钮）。
+  bool _antiRepeatWanted = true;
 
   /// 页面里的遮罩此刻还剩多少毫秒。由页面自己的 `[flipguard]` 控制台消息驱动
   /// （`cool <ms> <reason>` / `release`）——那是"页面真的翻过去了"的唯一可靠来源，
@@ -155,6 +162,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
         .listen(_onNativeEvent);
     _pinWanted = _state?.settings.lockTaskEnabled ?? false;
     _flipGuardWanted = _state?.settings.flipGuardEnabled ?? false;
+    _antiRepeatWanted = _state?.settings.antiRepeatEnabled ?? true;
     unawaited(_refreshPinActive());
     _addTab(activate: true);
   }
@@ -175,6 +183,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
     if (_flipGuardWanted != settings.flipGuardEnabled) {
       _flipGuardWanted = settings.flipGuardEnabled;
       if (!_flipGuardWanted) _endGuardHold();
+    }
+    if (_antiRepeatWanted != settings.antiRepeatEnabled) {
+      _antiRepeatWanted = settings.antiRepeatEnabled;
     }
   }
 
@@ -727,12 +738,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
   Future<void> _toggleFlipGuard() async {
     final state = _state;
     // 防翻页 会限制孩子的翻页并挡住返回，同样先问密码。
-    final bool allowed = await _confirmParent(
-      '防翻页',
-      '防翻页会限制孩子翻页（锁住期间还挡住返回、起始页与标签页操作）；开关需要家长密码。',
+    final bool want = !_flipGuardWanted;
+    final bool allowed = await _confirmSwitch(
+      '关闭防翻页',
+      '关闭防翻页需要家长密码（打开不需要）。关掉之后孩子可以随意翻页。',
+      turningOn: want,
     );
     if (!allowed) return;
-    final bool want = !_flipGuardWanted;
     setState(() => _flipGuardWanted = want);
     if (!want) _endGuardHold();
     final int seconds = state?.settings.flipGuardSeconds ?? 10;
@@ -740,6 +752,25 @@ class _BrowserScreenState extends State<BrowserScreen> {
     if (state == null) return;
     await state.updateSettings(
       state.settings.copyWith(flipGuardEnabled: want),
+    );
+  }
+
+  /// Toggles 防反复看 from the top bar (same row as 防翻页).
+  Future<void> _toggleAntiRepeat() async {
+    final state = _state;
+    final bool want = !_antiRepeatWanted;
+    final bool allowed = await _confirmSwitch(
+      '关闭防反复看',
+      '关闭防反复看需要家长密码（打开不需要）。关掉之后看过的书签不再变灰，可以反复打开。',
+      turningOn: want,
+    );
+    if (!allowed) return;
+    setState(() => _antiRepeatWanted = want);
+    final int minutes = state?.settings.antiRepeatMinutes ?? 10;
+    _snack(want ? '防反复看：已开启（看过 $minutes 分钟后才能再看）' : '防反复看：已关闭');
+    if (state == null) return;
+    await state.updateSettings(
+      state.settings.copyWith(antiRepeatEnabled: want),
     );
   }
 
@@ -766,6 +797,21 @@ class _BrowserScreenState extends State<BrowserScreen> {
     final bool active = result != 'none';
     if (active == _pinActive) return;
     setState(() => _pinActive = active);
+  }
+
+  /// The rule for the protection switches: **turning one on needs no password,
+  /// turning it off does.**
+  ///
+  /// A child flipping a protection on only makes the tablet stricter (and is easy
+  /// to undo), while switching one off is exactly what the protection exists to
+  /// prevent — so the password guards only that direction.
+  Future<bool> _confirmSwitch(
+    String title,
+    String reason, {
+    required bool turningOn,
+  }) async {
+    if (turningOn) return true;
+    return _confirmParent(title, reason);
   }
 
   /// Asks for the parental password before a parent-only switch is touched.
@@ -916,6 +962,8 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 onTogglePinned: _togglePinned,
                 flipGuardWanted: _flipGuardWanted,
                 onToggleFlipGuard: _toggleFlipGuard,
+                antiRepeatWanted: _antiRepeatWanted,
+                onToggleAntiRepeat: _toggleAntiRepeat,
                 guardCooling: _guardCooling,
                 guardRemaining: _guardRemainingSeconds,
                 guardReason: _guardReason,
@@ -964,11 +1012,6 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   ),
                 ),
               ),
-              if (_guardCooling)
-                _FlipGuardCountdown(
-                  remaining: _guardRemainingSeconds,
-                  total: state.settings.flipGuardSeconds,
-                ),
               if (tab != null && tab.loading)
                 LinearProgressIndicator(
                   value: tab.progress <= 0 ? null : tab.progress / 100,
@@ -1043,6 +1086,8 @@ class _BrowserTopBar extends StatelessWidget {
     required this.onTogglePinned,
     required this.flipGuardWanted,
     required this.onToggleFlipGuard,
+    required this.antiRepeatWanted,
+    required this.onToggleAntiRepeat,
     required this.guardCooling,
     required this.guardRemaining,
     required this.guardReason,
@@ -1079,6 +1124,10 @@ class _BrowserTopBar extends StatelessWidget {
 
   /// 切换「防翻页」。
   final VoidCallback onToggleFlipGuard;
+
+  /// 防反复看 的开关状态，以及切换它（跟防翻页并排）。
+  final bool antiRepeatWanted;
+  final VoidCallback onToggleAntiRepeat;
 
   /// 页面正被防翻页锁着，还剩几秒、因为什么——用来提示"按了也没用"。
   final bool guardCooling;
@@ -1210,21 +1259,47 @@ class _BrowserTopBar extends StatelessWidget {
               },
             ),
           ),
-          // 防翻页：紧挨着固定桌面（两个都是"管孩子"的开关），与「+」「⋮」同一排。
+          // 防反复看 + 防翻页：并排放在「固定桌面」左边（三个都是"管孩子"的开关）。
+          IconButton(
+            key: antiRepeatToggleKey,
+            tooltip: antiRepeatWanted
+                ? '防反复看：已开启（点一下需要家长密码）'
+                : '防反复看：已关闭（点一下开启，不用密码）',
+            visualDensity: VisualDensity.compact,
+            onPressed: onToggleAntiRepeat,
+            icon: Icon(
+              antiRepeatWanted ? Icons.timer_outlined : Icons.timer_off_outlined,
+              size: 20,
+              color: antiRepeatWanted ? theme.colorScheme.primary : null,
+            ),
+          ),
+          // The countdown lives **in the bar** as a badge on the lock icon: the
+          // strip that used to sit under the bar pushed the page down for a few
+          // seconds at a time, which is exactly the page space it must not cost.
           IconButton(
             key: flipGuardToggleKey,
             tooltip: flipGuardWanted
                 ? (guardCooling
                     ? '防翻页：已开启，正在锁（还有 $guardRemaining 秒，$guardReason）'
-                    : '防翻页：已开启（点一下关闭）')
-                : '防翻页：已关闭（点一下开启：翻页后锁几秒）',
+                    : '防翻页：已开启（点一下需要家长密码）')
+                : '防翻页：已关闭（点一下开启，不用密码）',
             visualDensity: VisualDensity.compact,
             onPressed: onToggleFlipGuard,
-            icon: Icon(
-              flipGuardWanted ? Icons.lock_clock : Icons.lock_open_outlined,
-              size: 20,
-              color: flipGuardWanted ? theme.colorScheme.primary : null,
-            ),
+            icon: guardCooling
+                ? Badge(
+                    key: flipGuardCountdownKey,
+                    label: Text('$guardRemaining'),
+                    child: Icon(
+                      Icons.lock_clock,
+                      size: 20,
+                      color: theme.colorScheme.primary,
+                    ),
+                  )
+                : Icon(
+                    flipGuardWanted ? Icons.lock_clock : Icons.lock_open_outlined,
+                    size: 20,
+                    color: flipGuardWanted ? theme.colorScheme.primary : null,
+                  ),
           ),
           // 固定桌面：与「+」「⋮」同一排。图标跟着**开关意图**走（按下即翻），
           // 提示里如实写出系统那边的真实状态。
@@ -1298,58 +1373,6 @@ class _BrowserTopBar extends StatelessWidget {
 /// Shown instead of the WebView when the policy refused a navigation. The
 /// native layer renders its own equivalent page for refusals it detects
 /// itself (redirects, subresources, popups).
-/// The strip under the top bar while 防翻页 is holding the page.
-///
-/// It shows what is left so the child can see the page is not broken (the mask
-/// inside the page is invisible by design) — and so the parent can tell a lock
-/// apart from a page that stopped responding.
-class _FlipGuardCountdown extends StatelessWidget {
-  const _FlipGuardCountdown({required this.remaining, required this.total});
-
-  /// Whole seconds left, already rounded up.
-  final int remaining;
-
-  /// The configured hold, for the progress line.
-  final int total;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final double fraction = total <= 0
-        ? 0
-        : (remaining / total).clamp(0.0, 1.0).toDouble();
-    return Container(
-      key: flipGuardCountdownKey,
-      width: double.infinity,
-      color: theme.colorScheme.primaryContainer,
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
-      child: Row(
-        children: [
-          Icon(
-            Icons.lock_clock,
-            size: 16,
-            color: theme.colorScheme.onPrimaryContainer,
-          ),
-          const SizedBox(width: 8),
-          Text(
-            '防翻页：还有 $remaining 秒',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onPrimaryContainer,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(2),
-              child: LinearProgressIndicator(value: fraction, minHeight: 4),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _BlockedView extends StatelessWidget {
   const _BlockedView({
     required this.url,

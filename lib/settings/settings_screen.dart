@@ -425,7 +425,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           title: const Text('防反复看（看过先变灰，过一会儿才能再看）'),
           subtitle: const Text('从首页点开过的书签会变灰并显示剩余时间，时间到之前再点不会打开；'
-              '时间存进书签本身，重启应用也不会提前解锁。家长在编辑模式里不受限制。'),
+              '时间存进书签本身，重启应用也不会提前解锁。家长在编辑模式里不受限制。'
+              '顶栏「防翻页」旁边也有一个开关：打开不用密码，关闭要家长密码。'),
         ),
         if (settings.antiRepeatEnabled) ...[
           const SizedBox(height: 6),
@@ -465,8 +466,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           title: const Text('防翻页（翻过去之后先停一下）'),
           subtitle: const Text('绘本翻页后，页面上会盖一层看不见的遮罩：接下来几秒里再点、再滑、'
-              '按翻页键都不会有反应，屏幕顶部显示倒计时，底部显示一个 🔒 提示，时间到自己恢复。'
-              '锁住期间也不让按返回、不让回起始页。顶栏「固定桌面」旁边也有一个开关。'),
+              '按翻页键都不会有反应，顶栏那个锁图标上直接显示剩余秒数（不占页面空间），'
+              '页面底部还会弹一个 🔒 提示，时间到自己恢复。锁住期间也不让按返回、不让回起始页。'
+              '顶栏也有一个开关，跟「防反复看」并排：打开不用密码，关闭要家长密码。'),
         ),
         if (settings.flipGuardEnabled) ...[
           const SizedBox(height: 6),
@@ -498,7 +500,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             '打字、普通上下滚动都不会被锁，所以游戏里答题不受影响；'
             '如果绘本是用 canvas 画出来的、DOM 完全不动，就只能靠横滑和边缘点击这类手势判断。'
             '遮罩只在本页面里生效，不会挡住应用自己的按钮；关闭开关会立刻撤销。'
-            '缺省是**关闭**的，家长从顶栏（锁定图标）一键开启。',
+            '缺省是关闭的，家长从顶栏（锁图标）一键开启；顶栏开关打开不需要密码，'
+            '关闭需要家长密码。',
           ),
         ],
       ],

@@ -759,7 +759,7 @@ void main() {
     await waitFor(tester, () => state.settings.flipGuardEnabled == false);
   });
 
-  testWidgets('防翻页：锁住时顶部有倒计时，返回与起始页都按不动', (tester) async {
+  testWidgets('防翻页：锁住时顶栏显示倒计时数字，返回与起始页都按不动', (tester) async {
     await tester.runAsync(() async {
       await state.addBookmark(url: 'https://school.test/lessons', title: '课程平台');
       await state.updateSettings(
@@ -786,8 +786,19 @@ void main() {
       'source': '',
       'line': 0,
     });
-    expect(find.byKey(flipGuardCountdownKey), findsOneWidget);
-    expect(find.textContaining('防翻页：还有'), findsOneWidget);
+    final Finder badge = find.byKey(flipGuardCountdownKey);
+    expect(badge, findsOneWidget);
+    String badgeText() => tester
+        .widget<Text>(find.descendant(of: badge, matching: find.byType(Text)))
+        .data!;
+    expect(badgeText(), '10');
+    // The countdown costs no page space: it is a badge inside the top-bar switch,
+    // not a strip that pushes the page down.
+    expect(
+      find.descendant(of: find.byKey(flipGuardToggleKey), matching: badge),
+      findsOneWidget,
+      reason: '倒计时数字要显示在顶栏那个按钮里',
+    );
     expect(
       state.appLog.any((entry) => entry.message.contains('触发信号：横向滑动')),
       isTrue,
@@ -796,17 +807,14 @@ void main() {
 
     // It ticks down: 1 s later the number is smaller.
     await tester.pump(const Duration(seconds: 1));
-    final String shown = tester
-        .widget<Text>(find.textContaining('防翻页：还有'))
-        .data!;
-    expect(shown, isNot(contains('还有 10 秒')));
+    expect(badgeText(), isNot('10'));
 
     // Even the tooltip says the way out is held.
     expect(
       find.byWidgetPredicate(
         (Widget widget) =>
             widget is Tooltip &&
-            (widget.message ?? '').contains('防翻页：还有'),
+            (widget.message ?? '').contains('正在锁（还有'),
       ),
       findsWidgets,
     );
@@ -820,10 +828,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(PolicyWebView), findsOneWidget);
     expect(find.byType(StartView), findsNothing);
-    expect(find.textContaining('防翻页：还有'), findsWidgets,
-        reason: '按了要说明还剩几秒，而不是默默无反应');
+    expect(
+      find.textContaining('防翻页：还有'),
+      findsWidgets,
+      reason: '按了要说明还剩几秒，而不是默默无反应',
+    );
 
-    // The mask releases: the strip goes away and the ways out work again.
+    // The mask releases: the badge goes away and the ways out work again.
     await sendNativeEvent(tester, <String, dynamic>{
       'type': 'consoleMessage',
       'viewId': activeViewId(),
@@ -861,14 +872,7 @@ void main() {
     expect(find.byType(StartView), findsOneWidget);
   });
 
-  testWidgets('固定桌面与防翻页：都要先过家长密码', (tester) async {
-    List<String> lockMethods() => commandCalls
-        .where((MethodCall call) =>
-            call.method == 'startLockTask' || call.method == 'stopLockTask')
-        .map((MethodCall call) => call.method)
-        .toList();
-
-    // A password is configured, so the two child-facing switches must ask.
+  testWidgets('保护开关：打开不用密码，关闭要密码（防反复看/防翻页）', (tester) async {
     final String salt = ParentalPassword.newSalt();
     state = AppState(
       store: ConfigStore(directory),
@@ -886,58 +890,123 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // 固定桌面: the dialog comes first, and nothing is switched behind it.
+    // 防翻页 缺省关闭：打开它只是"更严"，所以不问密码。
+    expect(state.settings.flipGuardEnabled, isFalse);
+    await tester.tap(find.byKey(flipGuardToggleKey));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(parentalPromptPasswordKey),
+      findsNothing,
+      reason: '打开保护不该要密码',
+    );
+    await waitFor(tester, () => state.settings.flipGuardEnabled == true);
+
+    // 再点就是"关闭"，这一下必须过密码；取消则保持开启。
+    await tester.tap(find.byKey(flipGuardToggleKey));
+    await tester.pumpAndSettle();
+    expect(find.byKey(parentalPromptPasswordKey), findsOneWidget);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(state.settings.flipGuardEnabled, isTrue, reason: '取消不能把保护关掉');
+
+    // 输错也不行（密码框会留在原地让家长重试）。
+    await tester.tap(find.byKey(flipGuardToggleKey));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(parentalPromptPasswordKey), '0000');
+    await tester.tap(find.text('确认'));
+    await tester.pumpAndSettle();
+    expect(state.settings.flipGuardEnabled, isTrue);
+    expect(find.byKey(parentalPromptPasswordKey), findsOneWidget);
+
+    // 输对才关掉。
+    await tester.enterText(find.byKey(parentalPromptPasswordKey), '2468');
+    await tester.tap(find.text('确认'));
+    await tester.pumpAndSettle();
+    await waitFor(tester, () => state.settings.flipGuardEnabled == false);
+
+    // 防反复看：同一个排里的第三个按钮，缺省开启，所以第一下就是"关闭"→要密码。
+    final Finder anti = find.byKey(antiRepeatToggleKey);
+    expect(anti, findsOneWidget);
+    expect(state.settings.antiRepeatEnabled, isTrue);
+    final double guardY = tester.getCenter(find.byKey(flipGuardToggleKey)).dy;
+    expect(tester.getCenter(anti).dy, guardY, reason: '和防翻页同一排');
+    expect(
+      tester.getCenter(anti).dx,
+      lessThan(tester.getCenter(find.byKey(flipGuardToggleKey)).dx),
+      reason: '两个保护开关要挨在一起',
+    );
+    await tester.tap(anti);
+    await tester.pumpAndSettle();
+    expect(find.byKey(parentalPromptPasswordKey), findsOneWidget);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(state.settings.antiRepeatEnabled, isTrue);
+
+    // 输对密码 → 关闭；再点一下是"打开"，不再问密码。
+    await tester.tap(anti);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(parentalPromptPasswordKey), '2468');
+    await tester.tap(find.text('确认'));
+    await tester.pumpAndSettle();
+    await waitFor(tester, () => state.settings.antiRepeatEnabled == false);
+    expect(
+      tester
+          .widget<Icon>(find.descendant(of: anti, matching: find.byType(Icon)))
+          .icon,
+      Icons.timer_off_outlined,
+    );
+    await tester.tap(anti);
+    await tester.pumpAndSettle();
+    expect(find.byKey(parentalPromptPasswordKey), findsNothing);
+    await waitFor(tester, () => state.settings.antiRepeatEnabled == true);
+    expect(
+      tester
+          .widget<Icon>(find.descendant(of: anti, matching: find.byType(Icon)))
+          .icon,
+      Icons.timer_outlined,
+    );
+  });
+
+  testWidgets('固定桌面：仍然两个方向都要密码', (tester) async {
+    List<String> lockMethods() => commandCalls
+        .where((MethodCall call) =>
+            call.method == 'startLockTask' || call.method == 'stopLockTask')
+        .map((MethodCall call) => call.method)
+        .toList();
+    final String salt = ParentalPassword.newSalt();
+    state = AppState(
+      store: ConfigStore(directory),
+      settings: AppSettings(
+        localServerEnabled: false,
+        localServerRoot: directory.path,
+        parentalGateEnabled: true,
+        parentalPasswordSalt: salt,
+        parentalPasswordHash: ParentalPassword.derive('2468', salt),
+      ),
+    );
+    await pumpShell(tester);
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 30)),
+    );
+    await tester.pumpAndSettle();
+
+    // 固定桌面 会把整台设备锁住，所以连"打开"也照旧问密码（这条规则没变）。
     await tester.tap(find.byKey(lockTaskToggleKey));
     await tester.pumpAndSettle();
     expect(find.byKey(parentalPromptPasswordKey), findsOneWidget);
-    expect(find.text('固定桌面'), findsWidgets);
     expect(state.settings.lockTaskEnabled, isFalse);
     expect(lockMethods(), isNot(contains('startLockTask')));
 
-    // A wrong password changes nothing either.
     await tester.enterText(find.byKey(parentalPromptPasswordKey), '0000');
     await tester.tap(find.text('确认'));
     await tester.pumpAndSettle();
     expect(state.settings.lockTaskEnabled, isFalse);
-    expect(lockMethods(), isNot(contains('startLockTask')));
 
-    // …and the right one switches it on.
     await tester.enterText(find.byKey(parentalPromptPasswordKey), '2468');
     await tester.tap(find.text('确认'));
     await tester.pumpAndSettle();
     await waitFor(tester, () => state.settings.lockTaskEnabled == true);
     expect(lockMethods(), contains('startLockTask'));
-
-    // 防翻页: same gate, and it is the switch that actually flips.
-    expect(state.settings.flipGuardEnabled, isFalse);
-    await tester.tap(find.byKey(flipGuardToggleKey));
-    await tester.pumpAndSettle();
-    expect(find.byKey(parentalPromptPasswordKey), findsOneWidget);
-    expect(state.settings.flipGuardEnabled, isFalse);
-    expect(
-      tester
-          .widget<Icon>(find.descendant(
-            of: find.byKey(flipGuardToggleKey),
-            matching: find.byType(Icon),
-          ))
-          .icon,
-      Icons.lock_open_outlined,
-      reason: '没通过验证之前图标不能翻',
-    );
-
-    await tester.enterText(find.byKey(parentalPromptPasswordKey), '2468');
-    await tester.tap(find.text('确认'));
-    await tester.pumpAndSettle();
-    await waitFor(tester, () => state.settings.flipGuardEnabled == true);
-    expect(
-      tester
-          .widget<Icon>(find.descendant(
-            of: find.byKey(flipGuardToggleKey),
-            matching: find.byType(Icon),
-          ))
-          .icon,
-      Icons.lock_clock,
-    );
   });
 
   testWidgets('家长验证整个关掉时，两个开关不再问密码', (tester) async {
@@ -990,7 +1059,7 @@ void main() {
     });
     await tester.pumpAndSettle();
     expect(guardIcon(), Icons.lock_clock);
-    expect(find.byTooltip('防翻页：已开启（点一下关闭）'), findsOneWidget);
+    expect(find.byTooltip('防翻页：已开启（点一下需要家长密码）'), findsOneWidget);
 
     // Switching it off again stops any countdown that was running.
     await sendNativeEvent(tester, <String, dynamic>{
