@@ -6,6 +6,12 @@ import '../state/app_scope.dart';
 import '../state/app_state.dart';
 import 'parental_password.dart';
 
+/// Test hook: the password field of the prompt dialog.
+///
+/// Separate from [passwordInputKey] (which belongs to the settings gate) so a
+/// test can tell the two dialogs apart.
+const Key parentalPromptPasswordKey = ValueKey<String>('parental-prompt-password');
+
 /// Asks for the parental password in a dialog.
 ///
 /// Returns true when the caller may continue. With no password configured there
@@ -106,6 +112,7 @@ class _ParentalPasswordDialogState extends State<_ParentalPasswordDialog> {
             Text(widget.reason, style: theme.textTheme.bodyMedium),
             const SizedBox(height: 14),
             TextField(
+              key: parentalPromptPasswordKey,
               controller: _password,
               autofocus: true,
               obscureText: true,

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../bookmarks/bookmark.dart';
 import '../bookmarks/bookmark_dialog.dart';
 import '../files/local_files_screen.dart';
+import '../parental/parental_password_prompt.dart';
 import '../log/request_log_screen.dart';
 import '../pdf/pdf_document.dart';
 import '../pdf/pdf_reader_screen.dart';
@@ -701,6 +702,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
   /// Toggles 防翻页 from the top bar and stores the choice.
   Future<void> _toggleFlipGuard() async {
     final state = _state;
+    // 防翻页 会限制孩子的翻页并挡住返回，同样先问密码。
+    final bool allowed = await _confirmParent(
+      '防翻页',
+      '防翻页会限制孩子翻页（锁住期间还挡住返回、起始页与标签页操作）；开关需要家长密码。',
+    );
+    if (!allowed) return;
     final bool want = !_flipGuardWanted;
     setState(() => _flipGuardWanted = want);
     if (!want) _endGuardHold();
@@ -737,6 +744,30 @@ class _BrowserScreenState extends State<BrowserScreen> {
     setState(() => _pinActive = active);
   }
 
+  /// Asks for the parental password before a parent-only switch is touched.
+  ///
+  /// Both top-bar switches sit in the child-facing chrome, so without this a
+  /// child could turn the device's controls off (or on) with one tap. There is
+  /// nothing to check when the parental gate is switched off entirely, or when
+  /// no password has been set yet — in the latter case the switch works and says
+  /// so, exactly like the home page's edit mode.
+  Future<bool> _confirmParent(String title, String reason) async {
+    final state = _state;
+    if (state == null) return false;
+    if (!state.settings.parentalGateEnabled) return true;
+    final bool unlocked = await showParentalPasswordPrompt(
+      context,
+      title: title,
+      reason: reason,
+      confirmLabel: '确认',
+    );
+    if (!mounted || !unlocked) return false;
+    if (!state.settings.hasParentalPassword) {
+      _snack('还没有设置家长密码，已直接切换（可在 设置 → 家长验证 里设置）');
+    }
+    return true;
+  }
+
   /// Toggles 固定桌面.
   ///
   /// The button follows the **intent**, which flips the moment it is pressed and
@@ -751,6 +782,12 @@ class _BrowserScreenState extends State<BrowserScreen> {
   /// back, it says so.
   Future<void> _togglePinned() async {
     final state = _state;
+    // 固定桌面 会给整台设备上锁，所以先问密码。
+    final bool allowed = await _confirmParent(
+      '固定桌面',
+      '固定桌面会屏蔽 Home 与最近任务键，把平板固定在本应用里；开关需要家长密码。',
+    );
+    if (!allowed) return;
     final bool want = !_pinWanted;
     setState(() => _pinWanted = want);
     // 先落一份"想要的状态"（不阻塞下面真正的动作：写盘是真实 I/O，会慢一拍），

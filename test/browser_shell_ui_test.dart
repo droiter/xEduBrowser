@@ -8,6 +8,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tablet_browser/bookmarks/bookmark_manager_screen.dart';
 import 'package:tablet_browser/browser/browser_screen.dart';
 import 'package:tablet_browser/browser/policy_webview.dart';
+import 'package:tablet_browser/parental/parental_password.dart';
+import 'package:tablet_browser/parental/parental_password_prompt.dart';
 import 'package:tablet_browser/browser/start_view.dart';
 import 'package:tablet_browser/files/local_file_url.dart';
 import 'package:tablet_browser/pdf/pdf_reader_screen.dart';
@@ -857,5 +859,108 @@ void main() {
     await tester.tap(find.widgetWithIcon(IconButton, Icons.home_outlined));
     await tester.pumpAndSettle();
     expect(find.byType(StartView), findsOneWidget);
+  });
+
+  testWidgets('固定桌面与防翻页：都要先过家长密码', (tester) async {
+    List<String> lockMethods() => commandCalls
+        .where((MethodCall call) =>
+            call.method == 'startLockTask' || call.method == 'stopLockTask')
+        .map((MethodCall call) => call.method)
+        .toList();
+
+    // A password is configured, so the two child-facing switches must ask.
+    final String salt = ParentalPassword.newSalt();
+    state = AppState(
+      store: ConfigStore(directory),
+      settings: AppSettings(
+        localServerEnabled: false,
+        localServerRoot: directory.path,
+        parentalGateEnabled: true,
+        parentalPasswordSalt: salt,
+        parentalPasswordHash: ParentalPassword.derive('2468', salt),
+      ),
+    );
+    await pumpShell(tester);
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 30)),
+    );
+    await tester.pumpAndSettle();
+
+    // 固定桌面: the dialog comes first, and nothing is switched behind it.
+    await tester.tap(find.byKey(lockTaskToggleKey));
+    await tester.pumpAndSettle();
+    expect(find.byKey(parentalPromptPasswordKey), findsOneWidget);
+    expect(find.text('固定桌面'), findsWidgets);
+    expect(state.settings.lockTaskEnabled, isFalse);
+    expect(lockMethods(), isNot(contains('startLockTask')));
+
+    // A wrong password changes nothing either.
+    await tester.enterText(find.byKey(parentalPromptPasswordKey), '0000');
+    await tester.tap(find.text('确认'));
+    await tester.pumpAndSettle();
+    expect(state.settings.lockTaskEnabled, isFalse);
+    expect(lockMethods(), isNot(contains('startLockTask')));
+
+    // …and the right one switches it on.
+    await tester.enterText(find.byKey(parentalPromptPasswordKey), '2468');
+    await tester.tap(find.text('确认'));
+    await tester.pumpAndSettle();
+    await waitFor(tester, () => state.settings.lockTaskEnabled == true);
+    expect(lockMethods(), contains('startLockTask'));
+
+    // 防翻页: same gate, and it is the switch that actually flips.
+    expect(state.settings.flipGuardEnabled, isFalse);
+    await tester.tap(find.byKey(flipGuardToggleKey));
+    await tester.pumpAndSettle();
+    expect(find.byKey(parentalPromptPasswordKey), findsOneWidget);
+    expect(state.settings.flipGuardEnabled, isFalse);
+    expect(
+      tester
+          .widget<Icon>(find.descendant(
+            of: find.byKey(flipGuardToggleKey),
+            matching: find.byType(Icon),
+          ))
+          .icon,
+      Icons.lock_open_outlined,
+      reason: '没通过验证之前图标不能翻',
+    );
+
+    await tester.enterText(find.byKey(parentalPromptPasswordKey), '2468');
+    await tester.tap(find.text('确认'));
+    await tester.pumpAndSettle();
+    await waitFor(tester, () => state.settings.flipGuardEnabled == true);
+    expect(
+      tester
+          .widget<Icon>(find.descendant(
+            of: find.byKey(flipGuardToggleKey),
+            matching: find.byType(Icon),
+          ))
+          .icon,
+      Icons.lock_clock,
+    );
+  });
+
+  testWidgets('家长验证整个关掉时，两个开关不再问密码', (tester) async {
+    final String salt = ParentalPassword.newSalt();
+    state = AppState(
+      store: ConfigStore(directory),
+      settings: AppSettings(
+        localServerEnabled: false,
+        localServerRoot: directory.path,
+        parentalGateEnabled: false,
+        parentalPasswordSalt: salt,
+        parentalPasswordHash: ParentalPassword.derive('2468', salt),
+      ),
+    );
+    await pumpShell(tester);
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 30)),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(flipGuardToggleKey));
+    await tester.pumpAndSettle();
+    expect(find.byKey(parentalPromptPasswordKey), findsNothing);
+    await waitFor(tester, () => state.settings.flipGuardEnabled == true);
   });
 }
