@@ -78,6 +78,11 @@ const Key antiRepeatToggleKey = ValueKey<String>('anti-repeat-toggle');
 /// holds the page (it used to be a strip under the bar, which cost page space).
 const Key flipGuardCountdownKey = ValueKey<String>('flip-guard-countdown');
 
+/// Test hook for the home wall's 编辑 / 完成 button. It sits in the top bar next
+/// to 固定桌面, so it is reachable from the wall without scrolling and is
+/// disabled whenever the active tab is not the bookmark page.
+const Key homeEditModeButtonKey = ValueKey<String>('home-edit-mode');
+
 class _BrowserScreenState extends State<BrowserScreen> {
   final List<BrowserTab> _tabs = [];
   StreamSubscription<BrowserEvent>? _eventSubscription;
@@ -409,6 +414,33 @@ class _BrowserScreenState extends State<BrowserScreen> {
     );
 
     _navigate(url);
+  }
+
+  /// Toggles the home wall's edit mode from the top-bar pencil.
+  ///
+  /// Only the bookmark page may edit bookmarks, so the button is disabled
+  /// everywhere else (a web page, and any route pushed over the browser such as
+  /// 设置). Navigating away does **not** turn the mode off by itself: a parent
+  /// who opens a tile to check the page comes back to the same controls, while
+  /// the disabled pencil says editing is not available there.
+  Future<void> _toggleHomeEditMode() async {
+    final state = _state;
+    final tab = _active;
+    if (state == null || tab == null || !tab.showsStartView) return;
+    if (state.homeEditMode) {
+      state.setHomeEditMode(false);
+      return;
+    }
+    final bool unlocked = await showParentalPasswordPrompt(
+      context,
+      title: '进入编辑模式',
+      reason: '编辑模式可以改书名、换分类、隐藏、重做预览图和删除书签，需要家长密码。',
+    );
+    if (!mounted || !unlocked) return;
+    if (!state.settings.hasParentalPassword) {
+      _snack('还没有设置家长密码，已直接进入编辑模式');
+    }
+    state.setHomeEditMode(true);
   }
 
   // ------------------------------------------------------------- previews
@@ -963,6 +995,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 pinWanted: _pinWanted,
                 pinActive: _pinActive,
                 onTogglePinned: _togglePinned,
+                editMode: state.homeEditMode,
+                // 只有书签页可以编辑书签；网页以及压在浏览器上的设置等页面里，
+                // 铅笔保持可见但禁用。
+                editEnabled: tab != null &&
+                    tab.showsStartView &&
+                    (ModalRoute.of(context)?.isCurrent ?? true),
+                onToggleEdit: _toggleHomeEditMode,
                 flipGuardWanted: _flipGuardWanted,
                 onToggleFlipGuard: _toggleFlipGuard,
                 antiRepeatWanted: _antiRepeatWanted,
@@ -1087,6 +1126,9 @@ class _BrowserTopBar extends StatelessWidget {
     required this.pinWanted,
     required this.pinActive,
     required this.onTogglePinned,
+    required this.editMode,
+    required this.editEnabled,
+    required this.onToggleEdit,
     required this.flipGuardWanted,
     required this.onToggleFlipGuard,
     required this.antiRepeatWanted,
@@ -1121,6 +1163,15 @@ class _BrowserTopBar extends StatelessWidget {
 
   /// 切换「固定桌面」。
   final VoidCallback onTogglePinned;
+
+  /// 首页书签墙是否在编辑模式（按钮显示 ✓ / 铅笔）。
+  final bool editMode;
+
+  /// 当前是不是书签页：不是就禁用编辑按钮（网页、设置等页面都不能改书签）。
+  final bool editEnabled;
+
+  /// 进入 / 退出首页编辑模式。
+  final VoidCallback onToggleEdit;
 
   /// 防翻页 的开关状态（跟 [pinWanted] 一样是意图，按下即翻）。
   final bool flipGuardWanted;
@@ -1321,6 +1372,21 @@ class _BrowserTopBar extends StatelessWidget {
               pinWanted ? Icons.push_pin : Icons.push_pin_outlined,
               size: 20,
               color: pinWanted ? theme.colorScheme.primary : null,
+            ),
+          ),
+          // 编辑书签：紧挨「固定桌面」右边（原来在书签墙的表头里，墙一滚就够不着了）。
+          // 只在书签页可用；网页、设置等页面上保持可见但禁用。
+          IconButton(
+            key: homeEditModeButtonKey,
+            tooltip: !editEnabled
+                ? '编辑书签（只在书签页可用）'
+                : (editMode ? '完成编辑' : '编辑书签（需要家长密码）'),
+            visualDensity: VisualDensity.compact,
+            onPressed: editEnabled ? onToggleEdit : null,
+            icon: Icon(
+              editMode ? Icons.check : Icons.edit_outlined,
+              size: 20,
+              color: editMode ? theme.colorScheme.primary : null,
             ),
           ),
           IconButton(

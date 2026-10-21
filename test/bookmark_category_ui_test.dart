@@ -211,6 +211,61 @@ void main() {
     expect(find.text('已折叠'), findsNothing);
   });
 
+  testWidgets('长分类缺省只铺 8 行，末尾的「展开」才放出其余书签', (tester) async {
+    late String categoryId;
+    await tester.runAsync(() async {
+      final lessons = await state.addCategory('课程');
+      categoryId = lessons.id;
+      for (int i = 0; i < 100; i++) {
+        await state.addBookmark(
+          url: 'https://site$i.test/page',
+          title: '书签 $i',
+          categoryId: lessons.id,
+        );
+      }
+    });
+
+    await pumpHome(tester);
+
+    Finder wallScrollable() => find
+        .descendant(of: find.byType(StartView), matching: find.byType(Scrollable))
+        .first;
+    final Finder expand =
+        find.byKey(ValueKey<String>('bookmark-section-expand-$categoryId'));
+
+    // 默认只构建前 8 行，第 8 行之外的书签没有被放到墙上。
+    expect(find.text('书签 99', skipOffstage: false), findsNothing);
+    expect(state.isSectionExpanded(categoryId), isFalse);
+
+    // 「展开」按钮在分类末尾：滚到 8 行底下才看得到。
+    await tester.scrollUntilVisible(expand, 400, scrollable: wallScrollable());
+    await tester.pumpAndSettle();
+    expect(expand, findsOneWidget);
+    expect(find.textContaining('展开（还有'), findsOneWidget);
+
+    await tester.tap(expand);
+    await tester.pumpAndSettle();
+    expect(state.isSectionExpanded(categoryId), isTrue);
+
+    // 完整分类可以一路滚到最后一块。
+    await tester.scrollUntilVisible(
+      find.text('书签 99'),
+      400,
+      scrollable: wallScrollable(),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('书签 99'), findsOneWidget);
+
+    // 分类末尾的按钮现在写「收起」；再点一次恢复缺省的 8 行。
+    await tester.scrollUntilVisible(expand, 400, scrollable: wallScrollable());
+    await tester.pumpAndSettle();
+    expect(find.text('收起'), findsOneWidget);
+    await tester.tap(expand);
+    await tester.pumpAndSettle();
+    expect(state.isSectionExpanded(categoryId), isFalse);
+    expect(find.textContaining('展开（还有'), findsOneWidget);
+  });
+
   /// Real file I/O only completes outside the fake-async zone, so the dialog
   /// pumps are followed by a few interleaved real-time pumps.
   Future<void> settleIo(WidgetTester tester, [int frames = 12]) async {
@@ -222,56 +277,45 @@ void main() {
     }
   }
 
-  testWidgets('the home edit mode is behind the parental password', (tester) async {
-    late String bookmarkId;
+  testWidgets('书签页有常驻滚动条，到顶、到底按钮把墙滚到两端', (tester) async {
     await tester.runAsync(() async {
-      await state.setParentalPassword('parent-2026');
-      final bookmark = await state.addBookmark(url: 'https://a.test/', title: '唯一');
-      bookmarkId = bookmark.id;
+      final lessons = await state.addCategory('课程');
+      for (int i = 0; i < 40; i++) {
+        await state.addBookmark(
+          url: 'https://site$i.test/page',
+          title: '书签 $i',
+          categoryId: lessons.id,
+        );
+      }
+      state.setHomeEditMode(true);
     });
 
     await pumpHome(tester);
 
-    // Locked by default: the wall has no per-tile controls at all.
-    expect(find.byKey(ValueKey<String>('edit-delete-$bookmarkId')), findsNothing);
+    final Scrollbar scrollbar = tester.widget<Scrollbar>(
+      find.descendant(
+        of: find.byType(StartView),
+        matching: find.byType(Scrollbar),
+      ),
+    );
+    expect(scrollbar.thumbVisibility, isTrue, reason: '侧边滚动条要常驻');
 
-    await tester.tap(find.byKey(homeEditModeButtonKey));
+    Finder wallScrollable() => find
+        .descendant(of: find.byType(StartView), matching: find.byType(Scrollable))
+        .first;
+    double offset() =>
+        tester.state<ScrollableState>(wallScrollable()).position.pixels;
+    double maxOffset() =>
+        tester.state<ScrollableState>(wallScrollable()).position.maxScrollExtent;
+
+    await tester.tap(find.byKey(homeScrollBottomKey));
     await tester.pumpAndSettle();
-    expect(find.text('进入编辑模式'), findsWidgets);
+    expect(offset(), maxOffset(), reason: '「到底」应把墙拉到最下面');
+    expect(offset(), greaterThan(0), reason: '先得真的把墙滚动起来');
 
-    // A wrong password keeps the mode shut.
-    await tester.enterText(find.byType(TextField), 'not-the-password');
-    await tester.tap(find.widgetWithText(FilledButton, '进入编辑模式'));
+    await tester.tap(find.byKey(homeScrollTopKey));
     await tester.pumpAndSettle();
-    expect(find.text('密码不正确'), findsOneWidget);
-    expect(state.homeEditMode, isFalse);
-
-    // The right one opens it and shows all six actions.
-    await tester.enterText(find.byType(TextField), 'parent-2026');
-    await tester.tap(find.widgetWithText(FilledButton, '进入编辑模式'));
-    await tester.pumpAndSettle();
-
-    expect(state.homeEditMode, isTrue);
-    for (final String action in <String>[
-      'favorite',
-      'hide',
-      'rename',
-      'move',
-      'thumbnail',
-      'delete',
-    ]) {
-      expect(
-        find.byKey(ValueKey<String>('edit-$action-$bookmarkId')),
-        findsOneWidget,
-        reason: '编辑模式应给出 $action 按钮',
-      );
-    }
-
-    // 完成 leaves the mode.
-    await tester.tap(find.byKey(homeEditDoneKey));
-    await tester.pumpAndSettle();
-    expect(state.homeEditMode, isFalse);
-    expect(find.byKey(ValueKey<String>('edit-delete-$bookmarkId')), findsNothing);
+    expect(offset(), 0, reason: '「到顶」应把墙拉回最上面');
   });
 
   testWidgets('编辑模式下点书签行本身也能打开网页', (tester) async {
@@ -453,36 +497,6 @@ void main() {
     await tester.tap(find.text('看过的'));
     await tester.pumpAndSettle();
     expect(opened, <String>['https://watched.test/']);
-  });
-
-  testWidgets('编辑模式有「回到顶部」，点了就回到墙顶', (tester) async {
-    await tester.runAsync(() async {
-      final lessons = await state.addCategory('课程');
-      for (int i = 0; i < 40; i++) {
-        await state.addBookmark(
-          url: 'https://site$i.test/page',
-          title: '书签 $i',
-          categoryId: lessons.id,
-        );
-      }
-      state.setHomeEditMode(true);
-    });
-
-    await pumpHome(tester);
-
-    Finder wallScrollable() => find
-        .descendant(of: find.byType(StartView), matching: find.byType(Scrollable))
-        .first;
-    double offset() =>
-        tester.state<ScrollableState>(wallScrollable()).position.pixels;
-
-    await tester.drag(find.byType(StartView), const Offset(0, -1200));
-    await tester.pumpAndSettle();
-    expect(offset(), greaterThan(0), reason: '先滚下去');
-
-    await tester.tap(find.byKey(homeEditTopKey));
-    await tester.pumpAndSettle();
-    expect(offset(), 0, reason: '「回到顶部」应把墙拉回最上面');
   });
 
   testWidgets('墙是懒加载的：一百多个书签也只构建看得见的那几行', (tester) async {

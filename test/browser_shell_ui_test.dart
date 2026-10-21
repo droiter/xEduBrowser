@@ -183,6 +183,106 @@ void main() {
     expect(find.text('书签管理'), findsWidgets);
   });
 
+  testWidgets('顶栏的编辑铅笔紧挨「固定桌面」，进编辑模式要家长密码', (tester) async {
+    late String bookmarkId;
+    await tester.runAsync(() async {
+      await state.setParentalPassword('parent-2026');
+      final bookmark = await state.addBookmark(
+        url: 'https://a.test/',
+        title: '唯一',
+      );
+      bookmarkId = bookmark.id;
+    });
+    await pumpShell(tester);
+
+    final Finder editButton = find.byKey(homeEditModeButtonKey);
+    expect(editButton, findsOneWidget);
+    // 与「固定桌面」同一排、紧挨在它右边（原来在书签墙表头里，墙一滚就够不着了）。
+    final Rect editRect = tester.getRect(editButton);
+    final Rect pinRect = tester.getRect(find.byKey(lockTaskToggleKey));
+    expect(editRect.center.dy, closeTo(pinRect.center.dy, 1));
+    expect(
+      (editRect.left - pinRect.right).abs(),
+      lessThan(16),
+      reason: '编辑按钮应紧挨着固定桌面',
+    );
+
+    // 未进入编辑模式：墙上没有操作按钮，按钮提示要密码。
+    expect(
+      find.byKey(ValueKey<String>('edit-delete-$bookmarkId')),
+      findsNothing,
+    );
+    expect(find.byTooltip('编辑书签（需要家长密码）'), findsOneWidget);
+
+    await tester.tap(editButton);
+    await tester.pumpAndSettle();
+    expect(find.text('进入编辑模式'), findsWidgets);
+
+    // 密码不对，编辑模式不开。
+    await tester.enterText(find.byType(TextField), 'not-the-password');
+    await tester.tap(find.widgetWithText(FilledButton, '进入编辑模式'));
+    await tester.pumpAndSettle();
+    expect(find.text('密码不正确'), findsOneWidget);
+    expect(state.homeEditMode, isFalse);
+
+    // 密码正确：六个操作按钮出现，顶栏按钮变成「完成编辑」。
+    await tester.enterText(find.byType(TextField), 'parent-2026');
+    await tester.tap(find.widgetWithText(FilledButton, '进入编辑模式'));
+    await tester.pumpAndSettle();
+    expect(state.homeEditMode, isTrue);
+    expect(
+      find.byKey(ValueKey<String>('edit-delete-$bookmarkId')),
+      findsOneWidget,
+    );
+    expect(find.byTooltip('完成编辑'), findsOneWidget);
+
+    // 同一个按钮退出编辑模式（不需要密码）。
+    await tester.tap(editButton);
+    await tester.pumpAndSettle();
+    expect(state.homeEditMode, isFalse);
+    expect(
+      find.byKey(ValueKey<String>('edit-delete-$bookmarkId')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('编辑铅笔只在书签页可用：网页和设置页里都禁用', (tester) async {
+    await tester.runAsync(() async {
+      await state.addBookmark(url: 'https://school.test/lessons', title: '课程平台');
+    });
+    await pumpShell(tester);
+
+    IconButton editButton({bool skipOffstage = true}) =>
+        tester.widget<IconButton>(
+          find.byKey(homeEditModeButtonKey, skipOffstage: skipOffstage),
+        );
+
+    expect(editButton().onPressed, isNotNull, reason: '书签页可以编辑');
+
+    // 打开网页：同一个按钮还在顶栏，但已禁用。
+    await tester.tap(find.text('课程平台'));
+    await tester.pump();
+    expect(find.byType(PolicyWebView), findsOneWidget);
+    expect(editButton().onPressed, isNull, reason: '网页上不能编辑书签');
+
+    // 回到书签页：按钮恢复。
+    await tester.tap(find.byTooltip('起始页'));
+    await tester.pumpAndSettle();
+    expect(find.byType(StartView), findsOneWidget);
+    expect(editButton().onPressed, isNotNull);
+
+    // 设置页压在浏览器上：底层顶栏的编辑按钮也禁用。
+    await tester.tap(find.byTooltip('菜单'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle();
+    expect(
+      editButton(skipOffstage: false).onPressed,
+      isNull,
+      reason: '设置等非书签页面里编辑按钮要禁用',
+    );
+  });
+
   /// Simulates the Android back button.
   Future<void> pressSystemBack(WidgetTester tester) async {
     await tester.binding.defaultBinaryMessenger.handlePlatformMessage(

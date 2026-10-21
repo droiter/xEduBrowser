@@ -1362,6 +1362,25 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Sections whose long content the parent expanded past the default 8 rows
+  /// with the 展开 button.
+  ///
+  /// Like the fold state this is pure view state and is not persisted: a restart
+  /// shows every category at its compact eight rows again, so no category is left
+  /// unexpectedly long. Keyed by section id, so 我的最爱 has its own entry.
+  final Set<String> _expandedSections = <String>{};
+
+  bool isSectionExpanded(String sectionId) =>
+      _expandedSections.contains(sectionId);
+
+  /// Shows the rest of a long section, or folds it back to its first rows.
+  void toggleSectionExpanded(String sectionId) {
+    if (!_expandedSections.remove(sectionId)) {
+      _expandedSections.add(sectionId);
+    }
+    notifyListeners();
+  }
+
   // --------------------------------------------------------------- import
 
   /// Imports every HTML page found in the **first-level subdirectories** of

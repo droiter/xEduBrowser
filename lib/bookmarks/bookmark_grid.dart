@@ -8,26 +8,19 @@ import '../state/app_state.dart';
 import 'bookmark.dart';
 import 'bookmark_edit_actions.dart';
 
-/// Test hook for the home page's 进入编辑模式 button.
-const Key homeEditModeButtonKey = ValueKey<String>('home-edit-mode');
-
-/// Test hook for the 完成 button shown while the home page is in edit mode.
-const Key homeEditDoneKey = ValueKey<String>('home-edit-done');
-
-/// Test hook for the 回到顶部 button, shown next to 完成 in edit mode.
-const Key homeEditTopKey = ValueKey<String>('home-edit-top');
-
 /// The home page bookmark wall: one section per category, each a grid of square
 /// tiles with the title underneath, with the starred 我的最爱 section pinned on
 /// top.
 ///
 /// Tiles can be dragged onto one another to change their order inside a
 /// category, and dragged from one category into another. A section header folds
-/// its category shut, so a wall with several subjects fits on one screen. There
-/// is deliberately no add/delete control here — bookmarks are managed in the
-/// settings screen, or from [editing] mode, which a parent unlocks with the
-/// parental password. Hidden bookmarks are left out unless [editing] is on, so
-/// the parent can always bring one back.
+/// its category shut, so a wall with several subjects fits on one screen; a
+/// section longer than [visibleRows] rows shows a 展开 button at its end instead
+/// of dumping the whole category on the wall. There is deliberately no
+/// add/delete control here — bookmarks are managed in the settings screen, or
+/// from [editing] mode, which a parent unlocks with the parental password
+/// (the pencil lives in the browser's top bar). Hidden bookmarks are left out
+/// unless [editing] is on, so the parent can always bring one back.
 class BookmarkGrid extends StatelessWidget {
   const BookmarkGrid({
     super.key,
@@ -35,6 +28,11 @@ class BookmarkGrid extends StatelessWidget {
     this.editing = false,
     required this.wallWidth,
   });
+
+  /// How many tile rows of a category the wall shows before folding the rest
+  /// behind its 展开 button. Eight rows already fill a tablet screen; a long
+  /// category would otherwise push every other category out of sight.
+  static const int visibleRows = 8;
 
   /// Width the wall itself gets (the scroll view minus its padding).
   ///
@@ -178,7 +176,7 @@ class _HiddenWallNotice extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              '$hidden 个书签都被隐藏了（书签或它所在的分类）。点右上角的铅笔进入编辑模式，'
+              '$hidden 个书签都被隐藏了（书签或它所在的分类）。点顶栏的铅笔进入编辑模式，'
               '再点眼睛图标即可恢复。',
               style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
             ),
@@ -241,6 +239,17 @@ class _CategorySection extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final collapsed = state.isCategoryCollapsed(sectionId);
+
+    // 每个分类缺省只铺 8 行；再多就折到分类末尾的「展开」按钮后面。行数按实际的
+    // 列数折算，所以窗口宽窄不同也始终是"8 行"，而不是 8 个。
+    final (int columns, _) = _columns(wallWidth);
+    final int capacity = columns * BookmarkGrid.visibleRows;
+    final bool overflows = bookmarks.length > capacity;
+    final bool expanded = state.isSectionExpanded(sectionId);
+    final List<Bookmark> visible = overflows && !expanded
+        ? bookmarks.sublist(0, capacity)
+        : bookmarks;
+    final int foldedCount = bookmarks.length - visible.length;
 
     return SliverMainAxisGroup(
       slivers: <Widget>[
@@ -320,7 +329,25 @@ class _CategorySection extends StatelessWidget {
         // bookmarks costs nothing to lay out.
         if (!collapsed) ...[
           const SliverToBoxAdapter(child: SizedBox(height: 10)),
-          if (editing) _editableRows() else _tileGrid(),
+          if (editing) _editableRows(visible) else _tileGrid(visible),
+          if (overflows)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Center(
+                  child: TextButton.icon(
+                    key: ValueKey<String>('bookmark-section-expand-$sectionId'),
+                    onPressed: () => state.toggleSectionExpanded(sectionId),
+                    icon: Icon(
+                      expanded ? Icons.expand_less : Icons.expand_more,
+                    ),
+                    label: Text(
+                      expanded ? '收起' : '展开（还有 $foldedCount 个书签）',
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
         // The gap that used to live between sections in the old Column.
         const SliverToBoxAdapter(child: SizedBox(height: 22)),
@@ -339,7 +366,7 @@ class _CategorySection extends StatelessWidget {
 
   /// The child's wall: the same lazy grid as before, now a real sliver so only
   /// the visible tiles are laid out.
-  Widget _tileGrid() => SliverGrid.builder(
+  Widget _tileGrid(List<Bookmark> visible) => SliverGrid.builder(
         gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
           maxCrossAxisExtent: _maxTileExtent,
           mainAxisSpacing: 18,
@@ -347,9 +374,9 @@ class _CategorySection extends StatelessWidget {
           // Taller than wide: the square thumbnail plus its caption below.
           childAspectRatio: 0.76,
         ),
-        itemCount: bookmarks.length,
+        itemCount: visible.length,
         itemBuilder: (BuildContext context, int index) {
-          final bookmark = bookmarks[index];
+          final bookmark = visible[index];
           return BookmarkTile(
             bookmark: bookmark,
             onOpen: () => onOpen(bookmark),
@@ -365,14 +392,14 @@ class _CategorySection extends StatelessWidget {
   /// tiles can, and [SliverList] keeps only the visible rows alive. Tapping a tile
   /// still opens the page — the buttons are for editing, not a replacement for
   /// visiting it.
-  Widget _editableRows() {
+  Widget _editableRows(List<Bookmark> visible) {
     final (int columns, double tileWidth) = _columns(wallWidth);
-    final int rows = (bookmarks.length / columns).ceil();
+    final int rows = (visible.length / columns).ceil();
     return SliverList.builder(
           itemCount: rows,
           itemBuilder: (BuildContext context, int row) {
             final int first = row * columns;
-            final int last = math.min(first + columns, bookmarks.length);
+            final int last = math.min(first + columns, visible.length);
             return Padding(
               // The Wrap this replaced spaced the runs, not the last row.
               padding: EdgeInsets.only(bottom: row == rows - 1 ? 0 : 18),
@@ -382,13 +409,13 @@ class _CategorySection extends StatelessWidget {
                   for (int i = first; i < last; i++) ...[
                     if (i > first) const SizedBox(width: _crossSpacing),
                     SizedBox(
-                      key: ValueKey<String>('edit-item-${bookmarks[i].id}'),
+                      key: ValueKey<String>('edit-item-${visible[i].id}'),
                       width: tileWidth,
                       child: _EditableTile(
                         state: state,
-                        bookmark: bookmarks[i],
+                        bookmark: visible[i],
                         width: tileWidth,
-                        onOpen: () => onOpen(bookmarks[i]),
+                        onOpen: () => onOpen(visible[i]),
                       ),
                     ),
                   ],
