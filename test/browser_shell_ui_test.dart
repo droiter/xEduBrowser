@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tablet_browser/bookmarks/bookmark_edit_actions.dart';
 import 'package:tablet_browser/bookmarks/bookmark_manager_screen.dart';
 import 'package:tablet_browser/browser/browser_screen.dart';
 import 'package:tablet_browser/browser/policy_webview.dart';
@@ -246,7 +247,7 @@ void main() {
     );
   });
 
-  testWidgets('编辑铅笔只在书签页可用：网页和设置页里都禁用', (tester) async {
+  testWidgets('编辑铅笔在书签页和已加书签的网页上可用，其它页面禁用', (tester) async {
     await tester.runAsync(() async {
       await state.addBookmark(url: 'https://school.test/lessons', title: '课程平台');
     });
@@ -259,11 +260,26 @@ void main() {
 
     expect(editButton().onPressed, isNotNull, reason: '书签页可以编辑');
 
-    // 打开网页：同一个按钮还在顶栏，但已禁用。
+    // 打开的这个页面本身是一条书签：铅笔可用，并带出六个页面操作按钮。
     await tester.tap(find.text('课程平台'));
     await tester.pump();
     expect(find.byType(PolicyWebView), findsOneWidget);
-    expect(editButton().onPressed, isNull, reason: '网页上不能编辑书签');
+    expect(find.byKey(pageBookmarkActionsKey), findsOneWidget);
+    expect(editButton().onPressed, isNotNull, reason: '已加书签的网页可以编辑');
+
+    // 网页跳到没有收藏的地址：页面工具栏消失，铅笔也禁用。
+    final int viewId =
+        tester.widget<PolicyWebView>(find.byType(PolicyWebView)).viewId;
+    await sendNativeEvent(tester, <String, dynamic>{
+      'type': 'urlChanged',
+      'viewId': viewId,
+      'url': 'https://other.test/page',
+      'canGoBack': false,
+      'canGoForward': false,
+    });
+    await tester.pumpAndSettle();
+    expect(find.byKey(pageBookmarkActionsKey), findsNothing);
+    expect(editButton().onPressed, isNull, reason: '未加书签的网页上不能编辑');
 
     // 回到书签页：按钮恢复。
     await tester.tap(find.byTooltip('起始页'));
@@ -281,6 +297,66 @@ void main() {
       isNull,
       reason: '设置等非书签页面里编辑按钮要禁用',
     );
+  });
+
+  testWidgets('网页工具栏显示当前书签的六个按钮，铅笔解锁后才可用', (tester) async {
+    await tester.runAsync(() async {
+      await state.setParentalPassword('parent-2026');
+      await state.addBookmark(url: 'https://school.test/lessons', title: '课程平台');
+    });
+    await pumpShell(tester);
+    await tester.tap(find.text('课程平台'));
+    await tester.pump();
+    expect(find.byType(PolicyWebView), findsOneWidget);
+
+    const List<Key> actionKeys = <Key>[
+      pageEditFavoriteKey,
+      pageEditHideKey,
+      pageEditRenameKey,
+      pageEditMoveKey,
+      pageEditThumbnailKey,
+      pageEditDeleteKey,
+    ];
+    expect(find.byKey(pageBookmarkActionsKey), findsOneWidget);
+    for (final Key key in actionKeys) {
+      final BookmarkEditActionButton button =
+          tester.widget<BookmarkEditActionButton>(find.byKey(key));
+      expect(button.enabled, isFalse, reason: '未解锁前按钮只是显示，不能点');
+    }
+
+    // 点顶栏铅笔 → 家长密码 → 六个按钮一起使能。
+    await tester.tap(find.byKey(homeEditModeButtonKey));
+    await tester.pumpAndSettle();
+    expect(find.byKey(parentalPromptPasswordKey), findsOneWidget);
+    await tester.enterText(find.byKey(parentalPromptPasswordKey), 'parent-2026');
+    await tester.tap(find.widgetWithText(FilledButton, '进入编辑模式'));
+    await tester.pumpAndSettle();
+    expect(state.homeEditMode, isTrue);
+    for (final Key key in actionKeys) {
+      final BookmarkEditActionButton button =
+          tester.widget<BookmarkEditActionButton>(find.byKey(key));
+      expect(button.enabled, isTrue, reason: '解锁后六个按钮都应可用');
+    }
+
+    // 与首页编辑模式同一套动作：点★就是收藏到我的最爱。
+    await tester.tap(find.byKey(pageEditFavoriteKey));
+    await tester.pumpAndSettle();
+    await waitFor(tester, () => state.bookmarks.single.favorite);
+    expect(state.bookmarks.single.favorite, isTrue);
+
+    // 删除也走同一套确认流程；删掉后当前页不再有书签，工具栏消失。
+    await tester.tap(find.byKey(pageEditDeleteKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '删除'));
+    await tester.pumpAndSettle();
+    await waitFor(tester, () => state.bookmarks.isEmpty);
+    expect(state.bookmarks, isEmpty);
+    expect(find.byKey(pageBookmarkActionsKey), findsNothing);
+
+    // 再点顶栏的 ✓ 退出编辑模式。
+    await tester.tap(find.byKey(homeEditModeButtonKey));
+    await tester.pumpAndSettle();
+    expect(state.homeEditMode, isFalse);
   });
 
   /// Simulates the Android back button.

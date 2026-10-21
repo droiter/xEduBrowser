@@ -165,6 +165,12 @@ class _StartViewState extends State<StartView> {
                   // 常驻滚动条：平板上外接鼠标时能一眼看到墙滚到哪儿了。
                   controller: _controller,
                   thumbVisibility: true,
+                  // Android 上必须显式打开：否则滑块只是画出来，手指/鼠标拖不动。
+                  // 加宽到 12dp 也是为了让手指按得住。
+                  interactive: true,
+                  thickness: 12,
+                  radius: const Radius.circular(6),
+                  scrollbarOrientation: ScrollbarOrientation.right,
                   child: CustomScrollView(
                     controller: _controller,
                     slivers: <Widget>[

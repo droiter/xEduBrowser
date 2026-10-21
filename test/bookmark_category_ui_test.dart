@@ -299,6 +299,8 @@ void main() {
       ),
     );
     expect(scrollbar.thumbVisibility, isTrue, reason: '侧边滚动条要常驻');
+    expect(scrollbar.interactive, isTrue, reason: '滚动条要能拖动');
+    expect(scrollbar.thickness, 12, reason: '滑块要够宽，手指按得住');
 
     Finder wallScrollable() => find
         .descendant(of: find.byType(StartView), matching: find.byType(Scrollable))

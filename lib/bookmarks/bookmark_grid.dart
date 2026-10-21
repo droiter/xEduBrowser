@@ -509,7 +509,7 @@ class _EditableTile extends StatelessWidget {
           alignment: WrapAlignment.center,
           spacing: 2,
           children: [
-            _EditAction(
+            BookmarkEditActionButton(
               key: ValueKey<String>('edit-favorite-$id'),
               label: bookmark.favorite ? '移出我的最爱' : '收藏到我的最爱',
               icon: bookmark.favorite ? Icons.star : Icons.star_border,
@@ -517,7 +517,7 @@ class _EditableTile extends StatelessWidget {
               onTap: () =>
                   BookmarkEditActions.toggleFavorite(context, state, bookmark),
             ),
-            _EditAction(
+            BookmarkEditActionButton(
               key: ValueKey<String>('edit-hide-$id'),
               label: bookmark.hidden ? '取消隐藏' : '隐藏（首页不显示）',
               icon: bookmark.hidden
@@ -526,26 +526,26 @@ class _EditableTile extends StatelessWidget {
               onTap: () =>
                   BookmarkEditActions.toggleHidden(context, state, bookmark),
             ),
-            _EditAction(
+            BookmarkEditActionButton(
               key: ValueKey<String>('edit-rename-$id'),
               label: '更改标题',
               icon: Icons.drive_file_rename_outline,
               onTap: () => BookmarkEditActions.rename(context, state, bookmark),
             ),
-            _EditAction(
+            BookmarkEditActionButton(
               key: ValueKey<String>('edit-move-$id'),
               label: '更换分类',
               icon: Icons.drive_file_move_outline,
               onTap: () => BookmarkEditActions.move(context, state, bookmark),
             ),
-            _EditAction(
+            BookmarkEditActionButton(
               key: ValueKey<String>('edit-thumbnail-$id'),
               label: '强制生成缩略图',
               icon: Icons.image_outlined,
               onTap: () =>
                   BookmarkEditActions.regenerateThumbnail(context, state, bookmark),
             ),
-            _EditAction(
+            BookmarkEditActionButton(
               key: ValueKey<String>('edit-delete-$id'),
               label: '删除',
               icon: Icons.delete_outline,
@@ -555,50 +555,6 @@ class _EditableTile extends StatelessWidget {
           ],
         ),
       ],
-    );
-  }
-}
-
-/// One of the six actions under an edit-mode tile.
-///
-/// Deliberately **not** an [IconButton]: the wall is lazy, so scrolling builds and
-/// discards rows continuously, and a Material icon button is a small tree of its
-/// own (ink response, tooltip, hover/focus machinery, icon theme) that has to be
-/// created and torn down again for every one of them. Six per tile × a row of
-/// tiles × every row scrolled past is what made editing stutter. The label stays
-/// for screen readers (and for `uiautomator`); the edit-mode hint above the wall
-/// lists the six actions by name.
-class _EditAction extends StatelessWidget {
-  const _EditAction({
-    super.key,
-    required this.label,
-    required this.icon,
-    required this.onTap,
-    this.color,
-  });
-
-  final String label;
-  final IconData icon;
-  final VoidCallback onTap;
-  final Color? color;
-
-  /// Comfortably tappable with a finger, small enough that six fit per tile.
-  static const double _size = 38;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: label,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(_size / 2),
-        child: SizedBox(
-          width: _size,
-          height: _size,
-          child: Icon(icon, size: 20, color: color),
-        ),
-      ),
     );
   }
 }

@@ -8,7 +8,8 @@ import 'bookmark_dialog.dart';
 import 'category_dialogs.dart';
 import 'thumbnail_capture.dart';
 
-/// The six things a parent can do to one bookmark from the home page's edit mode.
+/// The six things a parent can do to one bookmark from edit mode — on the home
+/// wall or in the page-view toolbar.
 ///
 /// They live here rather than inside the tile widget so the wall stays layout
 /// only, and so the same wording is used wherever an edit control appears next
@@ -120,3 +121,67 @@ abstract final class BookmarkEditActions {
     showAppSnackBar(context, '已删除「${bookmark.displayTitle}」');
   }
 }
+
+/// One of a bookmark's six edit actions, shared by the home wall's edit mode and
+/// the page-view toolbar.
+///
+/// Deliberately **not** an [IconButton]: the wall is lazy, so scrolling builds and
+/// discards rows continuously, and a Material icon button is a small tree of its
+/// own (ink response, tooltip, hover/focus machinery, icon theme) that has to be
+/// created and torn down again for every one of them. Six per tile × a row of
+/// tiles × every row scrolled past is what made editing stutter. The label stays
+/// for screen readers (and for `uiautomator`).
+///
+/// [enabled] lets the page-view toolbar show the six buttons before the parent
+/// has unlocked 编辑模式: they stay laid out, but grey and inert.
+class BookmarkEditActionButton extends StatelessWidget {
+  const BookmarkEditActionButton({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.onTap,
+    this.color,
+    this.tooltip,
+    this.enabled = true,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  final Color? color;
+
+  /// Hover/long-press hint; the home wall leaves it null (tooltips per tile were
+  /// part of the scrolling cost the lightweight button exists to avoid).
+  final String? tooltip;
+  final bool enabled;
+
+  /// Comfortably tappable with a finger, small enough that six fit per tile.
+  static const double _size = 38;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final Widget button = Semantics(
+      button: true,
+      enabled: enabled,
+      label: label,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(_size / 2),
+        child: SizedBox(
+          width: _size,
+          height: _size,
+          child: Icon(
+            icon,
+            size: 20,
+            color: enabled ? color : theme.disabledColor,
+          ),
+        ),
+      ),
+    );
+    final String? message = tooltip;
+    if (message == null) return button;
+    return Tooltip(message: message, child: button);
+  }
+}
+

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../bookmarks/bookmark.dart';
 import '../bookmarks/bookmark_dialog.dart';
+import '../bookmarks/bookmark_edit_actions.dart';
 import '../files/local_files_screen.dart';
 import '../parental/parental_password_prompt.dart';
 import '../log/request_log_screen.dart';
@@ -79,9 +80,21 @@ const Key antiRepeatToggleKey = ValueKey<String>('anti-repeat-toggle');
 const Key flipGuardCountdownKey = ValueKey<String>('flip-guard-countdown');
 
 /// Test hook for the home wall's 编辑 / 完成 button. It sits in the top bar next
-/// to 固定桌面, so it is reachable from the wall without scrolling and is
-/// disabled whenever the active tab is not the bookmark page.
+/// to 固定桌面, so it is reachable from the wall without scrolling. It is also
+/// enabled on a page that belongs to a bookmark, where the same button unlocks
+/// that page's six action buttons.
 const Key homeEditModeButtonKey = ValueKey<String>('home-edit-mode');
+
+/// Test hook for the page-view action bar (current page's six bookmark actions).
+const Key pageBookmarkActionsKey = ValueKey<String>('page-bookmark-actions');
+
+/// Test hooks for the six buttons the page-view action bar shows.
+const Key pageEditFavoriteKey = ValueKey<String>('page-edit-favorite');
+const Key pageEditHideKey = ValueKey<String>('page-edit-hide');
+const Key pageEditRenameKey = ValueKey<String>('page-edit-rename');
+const Key pageEditMoveKey = ValueKey<String>('page-edit-move');
+const Key pageEditThumbnailKey = ValueKey<String>('page-edit-thumbnail');
+const Key pageEditDeleteKey = ValueKey<String>('page-edit-delete');
 
 class _BrowserScreenState extends State<BrowserScreen> {
   final List<BrowserTab> _tabs = [];
@@ -416,17 +429,23 @@ class _BrowserScreenState extends State<BrowserScreen> {
     _navigate(url);
   }
 
-  /// Toggles the home wall's edit mode from the top-bar pencil.
+  /// Toggles 编辑模式 from the top-bar pencil.
   ///
-  /// Only the bookmark page may edit bookmarks, so the button is disabled
-  /// everywhere else (a web page, and any route pushed over the browser such as
-  /// 设置). Navigating away does **not** turn the mode off by itself: a parent
-  /// who opens a tile to check the page comes back to the same controls, while
-  /// the disabled pencil says editing is not available there.
-  Future<void> _toggleHomeEditMode() async {
+  /// It is available on the bookmark page and on any page that belongs to a
+  /// bookmark (the page-view toolbar then shows that bookmark's six actions).
+  /// Everywhere else — an unbookmarked page, and any route pushed over the
+  /// browser such as 设置 — it is disabled. Navigating away does **not** turn the
+  /// mode off by itself: a parent who opens a tile to check the page comes back
+  /// to the same controls, and while on the page the unlocked six buttons are
+  /// exactly what the pencil is for.
+  Future<void> _toggleEditMode() async {
     final state = _state;
     final tab = _active;
-    if (state == null || tab == null || !tab.showsStartView) return;
+    if (state == null || tab == null) return;
+    final bool onBookmarks = tab.showsStartView;
+    final bool onBookmarkedPage =
+        tab.blocked == null && state.bookmarkFor(tab.url) != null;
+    if (!onBookmarks && !onBookmarkedPage && !state.homeEditMode) return;
     if (state.homeEditMode) {
       state.setHomeEditMode(false);
       return;
@@ -969,6 +988,17 @@ class _BrowserScreenState extends State<BrowserScreen> {
     final state = AppScope.of(context);
     final tab = _active;
     final theme = Theme.of(context);
+    // 当前网页如果本身就是一条书签，页面工具栏就给出那六个操作按钮；网页后来
+    // 跳到未收藏的地址时，工具栏自动消失。
+    final Bookmark? pageBookmark = tab != null &&
+            !tab.showsStartView &&
+            tab.blocked == null
+        ? state.bookmarkFor(tab.url)
+        : null;
+    final bool routeIsCurrent = ModalRoute.of(context)?.isCurrent ?? true;
+    final bool editEnabled = routeIsCurrent &&
+        (state.homeEditMode ||
+            (tab != null && (tab.showsStartView || pageBookmark != null)));
 
     // No address bar: the page fills the screen and the only chrome is one thin
     // strip of navigation controls, the tab list and the menu.
@@ -996,12 +1026,10 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 pinActive: _pinActive,
                 onTogglePinned: _togglePinned,
                 editMode: state.homeEditMode,
-                // 只有书签页可以编辑书签；网页以及压在浏览器上的设置等页面里，
-                // 铅笔保持可见但禁用。
-                editEnabled: tab != null &&
-                    tab.showsStartView &&
-                    (ModalRoute.of(context)?.isCurrent ?? true),
-                onToggleEdit: _toggleHomeEditMode,
+                // 书签页、以及当前网页属于一条书签时都可以编辑；网页跳到未收藏
+                // 的地址、或压在浏览器上的设置等页面里，铅笔保持可见但禁用。
+                editEnabled: editEnabled,
+                onToggleEdit: _toggleEditMode,
                 flipGuardWanted: _flipGuardWanted,
                 onToggleFlipGuard: _toggleFlipGuard,
                 antiRepeatWanted: _antiRepeatWanted,
@@ -1058,6 +1086,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 LinearProgressIndicator(
                   value: tab.progress <= 0 ? null : tab.progress / 100,
                   minHeight: 2,
+                ),
+              // 网页浏览时也显示当前书签的六个操作按钮。它们先以禁用状态出现，
+              // 点顶栏铅笔并输入家长密码后，才跟首页编辑模式里的同款按钮一样可用。
+              if (pageBookmark != null)
+                _PageBookmarkActionBar(
+                  state: state,
+                  bookmark: pageBookmark,
+                  enabled: state.homeEditMode,
                 ),
               Expanded(
                 child: _tabs.isEmpty
@@ -1167,10 +1203,11 @@ class _BrowserTopBar extends StatelessWidget {
   /// 首页书签墙是否在编辑模式（按钮显示 ✓ / 铅笔）。
   final bool editMode;
 
-  /// 当前是不是书签页：不是就禁用编辑按钮（网页、设置等页面都不能改书签）。
+  /// 当前页面是否允许编辑书签：书签页或已加书签的网页为 true；其它网页
+  /// （以及设置等压在浏览器上的页面）为 false。
   final bool editEnabled;
 
-  /// 进入 / 退出首页编辑模式。
+  /// 进入 / 退出编辑模式（首页书签墙与网页书签工具栏共用）。
   final VoidCallback onToggleEdit;
 
   /// 防翻页 的开关状态（跟 [pinWanted] 一样是意图，按下即翻）。
@@ -1375,11 +1412,12 @@ class _BrowserTopBar extends StatelessWidget {
             ),
           ),
           // 编辑书签：紧挨「固定桌面」右边（原来在书签墙的表头里，墙一滚就够不着了）。
-          // 只在书签页可用；网页、设置等页面上保持可见但禁用。
+          // 书签页与「当前网页本身是一条书签」的页面可用；其它网页、设置等页面
+          // 保持可见但禁用。
           IconButton(
             key: homeEditModeButtonKey,
             tooltip: !editEnabled
-                ? '编辑书签（只在书签页可用）'
+                ? '编辑书签（只在书签页或已加书签的页面可用）'
                 : (editMode ? '完成编辑' : '编辑书签（需要家长密码）'),
             visualDensity: VisualDensity.compact,
             onPressed: editEnabled ? onToggleEdit : null,
@@ -1432,6 +1470,119 @@ class _BrowserTopBar extends StatelessWidget {
               if (onRefreshPreview != null)
                 const PopupMenuItem(value: 'preview', child: Text('更新当前页预览图')),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The current page's bookmark actions, shown as a thin toolbar under the main
+/// browser bar while the page belongs to a bookmark.
+///
+/// The six buttons are always laid out, but disabled until 编辑模式 is unlocked
+/// with the top-bar pencil (the same parental password as the home wall). The
+/// actions come from [BookmarkEditActions] — exactly the buttons under each home
+/// tile — so wording and effects cannot drift between the two places.
+class _PageBookmarkActionBar extends StatelessWidget {
+  const _PageBookmarkActionBar({
+    required this.state,
+    required this.bookmark,
+    required this.enabled,
+  });
+
+  final AppState state;
+  final Bookmark bookmark;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final bool favorite = bookmark.favorite;
+    final bool hidden = bookmark.hidden;
+    return Container(
+      key: pageBookmarkActionsKey,
+      height: 44,
+      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.28),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      child: Row(
+        children: <Widget>[
+          Tooltip(
+            message: enabled
+                ? '已解锁：这些是当前书签的编辑操作'
+                : '点顶栏的铅笔并输入家长密码后，这六个按钮才可用',
+            child: Icon(
+              enabled ? Icons.edit : Icons.lock_outline,
+              size: 17,
+              color: enabled ? theme.colorScheme.primary : theme.hintColor,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              bookmark.displayTitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: enabled ? null : theme.hintColor,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          BookmarkEditActionButton(
+            key: pageEditFavoriteKey,
+            label: favorite ? '移出我的最爱' : '收藏到我的最爱',
+            icon: favorite ? Icons.star : Icons.star_border,
+            color: favorite ? const Color(0xFFF2B01E) : null,
+            tooltip: favorite ? '移出我的最爱' : '收藏到我的最爱',
+            enabled: enabled,
+            onTap: () =>
+                BookmarkEditActions.toggleFavorite(context, state, bookmark),
+          ),
+          BookmarkEditActionButton(
+            key: pageEditHideKey,
+            label: hidden ? '取消隐藏' : '隐藏（首页不显示）',
+            icon: hidden
+                ? Icons.visibility_off_outlined
+                : Icons.visibility_outlined,
+            tooltip: hidden ? '取消隐藏' : '隐藏（首页不显示）',
+            enabled: enabled,
+            onTap: () =>
+                BookmarkEditActions.toggleHidden(context, state, bookmark),
+          ),
+          BookmarkEditActionButton(
+            key: pageEditRenameKey,
+            label: '更改标题',
+            icon: Icons.drive_file_rename_outline,
+            tooltip: '更改标题',
+            enabled: enabled,
+            onTap: () => BookmarkEditActions.rename(context, state, bookmark),
+          ),
+          BookmarkEditActionButton(
+            key: pageEditMoveKey,
+            label: '更换分类',
+            icon: Icons.drive_file_move_outline,
+            tooltip: '更换分类',
+            enabled: enabled,
+            onTap: () => BookmarkEditActions.move(context, state, bookmark),
+          ),
+          BookmarkEditActionButton(
+            key: pageEditThumbnailKey,
+            label: '强制生成缩略图',
+            icon: Icons.image_outlined,
+            tooltip: '强制生成缩略图',
+            enabled: enabled,
+            onTap: () =>
+                BookmarkEditActions.regenerateThumbnail(context, state, bookmark),
+          ),
+          BookmarkEditActionButton(
+            key: pageEditDeleteKey,
+            label: '删除',
+            icon: Icons.delete_outline,
+            color: theme.colorScheme.error,
+            tooltip: '删除',
+            enabled: enabled,
+            onTap: () => BookmarkEditActions.delete(context, state, bookmark),
           ),
         ],
       ),
