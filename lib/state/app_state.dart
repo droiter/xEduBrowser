@@ -11,6 +11,7 @@ import '../files/local_file_url.dart';
 import '../local_server/local_http_server.dart';
 import '../parental/parental_challenge.dart';
 import '../parental/parental_password.dart';
+import '../pdf/pdf_document.dart';
 import '../policy/policy_config.dart';
 import '../policy/policy_engine.dart';
 
@@ -1895,6 +1896,8 @@ class AppState extends ChangeNotifier {
             .where((Bookmark bookmark) => bookmark.thumbnailPath == null)
             .toList(),
         save: setBookmarkThumbnail,
+        renderPdfThumbnail: (Bookmark bookmark) =>
+            PdfDocuments.captureThumbnail(bookmark.url),
         log: (String tag, String message, {bool warn = false}) =>
             logEvent(tag, message, level: warn ? LogLevel.warn : LogLevel.info),
         isEnabled: () => _settings.backfillThumbnails,

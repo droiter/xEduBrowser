@@ -97,6 +97,26 @@ abstract final class BrowserBridge {
         'maxWidth': maxWidth,
       });
 
+  /// The text layer of one PDF page (lines with normalised coordinates), or null
+  /// when the page has no readable text.
+  ///
+  /// `PdfRenderer` only gives pixels, so the native side runs PDFBox over the
+  /// page and returns `{width, height, lines:[{text,left,top,right,bottom}]}`.
+  static Future<Map<String, dynamic>?> pdfPageText(
+    String path,
+    int index,
+  ) async {
+    final raw = await _invoke<Map<Object?, Object?>>('pdfPageText', {
+      'path': path,
+      'index': index,
+    });
+    if (raw == null) return null;
+    return Map<String, dynamic>.from(raw);
+  }
+
+  /// Releases the native parser's cached PDF for the reader that just closed.
+  static Future<void> closePdfText() => _invoke<void>('pdfCloseText');
+
   /// Pushes the whole policy (including the loopback mapping) to the native
   /// engine. Called on every policy change and after the local server starts.
   static Future<void> setPolicy(Map<String, dynamic> policy) =>

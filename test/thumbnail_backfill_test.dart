@@ -59,6 +59,7 @@ void main() {
     bool enabled = true,
     Duration gap = const Duration(seconds: 45),
     Duration idle = const Duration(seconds: 20),
+    Future<Uint8List?> Function(Bookmark)? renderPdf,
   }) {
     timers = FakeTimers();
     now = DateTime(2026, 1, 1, 12);
@@ -67,6 +68,7 @@ void main() {
       candidates: () => library
           .where((Bookmark bookmark) => bookmark.thumbnailPath == null)
           .toList(),
+      renderPdfThumbnail: renderPdf,
       save: (Bookmark target, Uint8List bytes) async {
         saved.add(target.id);
         // AppState.setBookmarkThumbnail writes the file and stores the path, so
@@ -108,6 +110,31 @@ void main() {
   });
 
   group('ThumbnailBackfill', () {
+    test('PDF 书签直接渲染第一页，不占用 WebView', () async {
+      library = <Bookmark>[
+        bookmark('p', 'file:///sdcard/ebooks/说明.pdf'),
+      ];
+      var rendered = 0;
+      final backfill = build(
+        renderPdf: (Bookmark target) async {
+          rendered++;
+          return bytes;
+        },
+      );
+
+      timers.fire();
+      // The PDF path does not publish a WebView request.
+      expect(backfill.request, isNull);
+      await pumpEventQueue();
+
+      expect(rendered, 1);
+      expect(saved, <String>['p']);
+      expect(backfill.capturedCount, 1);
+      expect(backfill.pendingCount, 0);
+      expect(logs.any((line) => line.contains('PDF 首页')), isTrue);
+      expect(logs.last, contains('后台补预览图完成：「书-p」'));
+    });
+
     test('第一个补图要等一个 gap，且一次只做一张', () {
       final backfill = build();
 
@@ -174,7 +201,7 @@ void main() {
       expect(saved, isEmpty);
       expect(backfill.failedCount, 1);
       expect(backfill.capturedCount, 0);
-      expect(logs.last, startsWith('W:后台补预览图失败：「书-a」截图为空'));
+      expect(logs.last, startsWith('W:后台补预览图失败：「书-a」预览图为空'));
       expect(backfill.pendingCount, 2);
 
       timers.fire();
@@ -187,7 +214,7 @@ void main() {
       expect(backfill.request!.bookmarkId, 'a');
     });
 
-    test('起始页与 PDF 永远不截图，也不占队列', () {
+    test('起始页不补图；没提供 PDF 渲染器时 PDF 也不占队列', () {
       library = <Bookmark>[
         bookmark('home', 'about:home'),
         bookmark('pdf', 'file:///sdcard/book/故事.pdf'),

@@ -35,10 +35,13 @@ class MainActivity : FlutterActivity() {
     private var bridge: PolicyBridge? = null
     private var commandChannel: MethodChannel? = null
     private var eventChannel: EventChannel? = null
+    private var pdfSpeech: PdfSpeech? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        PdfTextExtractor.init(applicationContext)
 
         val bridge = PolicyBridge(applicationContext)
         this.bridge = bridge
@@ -49,6 +52,8 @@ class MainActivity : FlutterActivity() {
         )
 
         val messenger = flutterEngine.dartExecutor.binaryMessenger
+
+        pdfSpeech = PdfSpeech(applicationContext, messenger)
 
         eventChannel = EventChannel(messenger, EVENTS_CHANNEL).also {
             it.setStreamHandler(bridge)
@@ -62,12 +67,14 @@ class MainActivity : FlutterActivity() {
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         try {
             bridge?.disposeAll()
+            pdfSpeech?.release()
             commandChannel?.setMethodCallHandler(null)
             eventChannel?.setStreamHandler(null)
         } catch (_: Throwable) {
             // Engine teardown must never throw.
         }
         bridge = null
+        pdfSpeech = null
         commandChannel = null
         eventChannel = null
         super.cleanUpFlutterEngine(flutterEngine)
@@ -238,6 +245,30 @@ class MainActivity : FlutterActivity() {
                     } else {
                         PdfPageRenderer.renderPage(path, index, maxWidth, answer)
                     }
+                }
+
+                // PDF text layer for tap-to-speak. Answers
+                // {width, height, lines:[{text,left,top,right,bottom}]} with
+                // coordinates normalised to the displayed page, or null when the
+                // page has no usable text.
+                "pdfPageText" -> {
+                    val path = call.argument<String>("path").orEmpty()
+                    val index = (call.argument<Any?>("index") as? Number)?.toInt() ?: -1
+                    val answered = AtomicBoolean(false)
+                    val answer: (Map<String, Any?>?) -> Unit = { page ->
+                        if (answered.compareAndSet(false, true)) result.success(page)
+                    }
+                    if (path.isEmpty() || index < 0) {
+                        answer(null)
+                    } else {
+                        PdfTextExtractor.pageText(path, index, answer)
+                    }
+                }
+
+                // The reader is gone: release the parsed PDFBox document.
+                "pdfCloseText" -> {
+                    PdfTextExtractor.close()
+                    result.success(mapOf("ok" to true))
                 }
 
                 // Not part of the frozen contract table, but the Dart bridge

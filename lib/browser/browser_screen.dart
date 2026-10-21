@@ -365,6 +365,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
         ? PdfDocuments.localPathOf(state.policyUrl(resolved.url))
         : null;
     if (pdfPath != null) {
+      unawaited(_ensurePdfPreview(state, resolved.url));
       unawaited(Navigator.of(context).push(MaterialPageRoute<void>(
         builder: (_) => PdfReaderScreen(url: pdfPath),
       )));
@@ -463,6 +464,23 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   // ------------------------------------------------------------- previews
+
+  /// Gives a PDF bookmark its first-page preview when it is opened without one.
+  ///
+  /// A PDF never enters the WebView path above, so without this an existing PDF
+  /// bookmark imported in bulk would keep its monogram forever. One-shot, like the
+  /// web preview: an existing picture is never replaced.
+  Future<void> _ensurePdfPreview(AppState state, String url) async {
+    final bookmark = state.bookmarkFor(url);
+    if (bookmark == null) return;
+    final String? thumbnail = bookmark.thumbnailPath;
+    if (thumbnail != null && thumbnail.isNotEmpty) return;
+    final bytes = await PdfDocuments.captureThumbnail(url);
+    if (!mounted || bytes == null || bytes.isEmpty) return;
+    final current = state.bookmarkFor(url);
+    if (current == null || current.id != bookmark.id) return;
+    await state.setBookmarkThumbnail(current, bytes);
+  }
 
   /// Fills in the tile preview of a bookmarked page that does not have one yet.
   ///

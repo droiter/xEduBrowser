@@ -31,6 +31,13 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            // PDFBox-Android's optional JPEG-2000/BouncyCastle paths are not
+            // shipped; keep its reflection-loaded classes and silence R8's
+            // missing-class warnings.
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 
@@ -54,6 +61,11 @@ dependencies {
     // Document-start script injection (`WebViewCompat.addDocumentStartJavaScript`),
     // used by the opt-in local fetch shim (see LocalFetchShim.kt).
     implementation("androidx.webkit:webkit:1.17.1")
+    // PDF text layer for the reader's tap-to-speak: Android's PdfRenderer only
+    // produces page bitmaps, so PDFBox-Android (the AWT-free Android port of
+    // PDFBox 2.0) extracts text runs and their coordinates. The AAR is vendored
+    // under app/libs because Maven Central is not reachable from the build host.
+    implementation(files("libs/pdfbox-android-2.0.27.0.aar"))
     testImplementation("junit:junit:4.13.2")
     // android.jar only ships org.json stubs on the unit-test classpath, so the
     // real implementation is added explicitly.

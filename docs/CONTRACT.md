@@ -209,13 +209,55 @@ pages through the images.
 |---|---|---|
 | `pdfPageCount` | `path` (filesystem path) | `int` (0 when the file cannot be read) |
 | `renderPdfPage` | `path`, `index` (0-based), `maxWidth` (int, default 1400) | `ByteArray` (PNG bytes) or `null` on failure |
+| `pdfPageText` | `path`, `index` (0-based) | `Map` or `null` (see below) |
 
-Dart side (`BrowserBridge.pdfPageCount` / `BrowserBridge.renderPdfPage`):
+Dart side (`BrowserBridge.pdfPageCount` / `BrowserBridge.renderPdfPage` /
+`BrowserBridge.pdfPageText`):
 
 ```dart
 static Future<int> pdfPageCount(String path);
 static Future<Uint8List?> renderPdfPage(String path, int index, {int maxWidth = 1400});
+static Future<Map<String, dynamic>?> pdfPageText(String path, int index);
 ```
+
+`pdfPageText` returns the text layer of a page for the reader's tap-to-speak:
+
+```text
+{
+  "width":  <display width in points, page rotation applied>,
+  "height": <display height in points>,
+  "lines": [
+    {"text": "...", "left": 0.1, "top": 0.2, "right": 0.9, "bottom": 0.25}
+  ]
+}
+```
+
+Coordinates are normalised 0…1 with the origin at the displayed page's top-left.
+`lines` may be empty (a scanned page); the whole map is `null` when the document
+cannot be parsed. Extraction runs on its own worker (`PdfTextExtractor.kt`),
+uses PDFBox-Android and answers on the platform thread exactly once; every
+failure is `null`, never an exception.
+
+**Thumbnails**: a PDF bookmark's tile preview is `renderPdfPage(path, 0,
+maxWidth: 480)`. The bookmark manager, the background backfill pass and the
+first open of an existing PDF all use it.
+
+**Speech**: the reader's TTS bridge is a separate two-way channel,
+`tablet_browser/pdf_tts` (`PdfSpeech.kt`):
+
+| Dart → Kotlin | Args | Returns |
+|---|---|---|
+| `speak` | `text`, `rate` (1.0 = normal) | utterance id (`String`) |
+| `setRate` | `rate` | the clamped rate |
+| `stop` | — | `null` |
+
+| Kotlin → Dart | Args |
+|---|---|
+| `onStart` / `onDone` / `onError` | `{"id": <utterance id>}` |
+
+`speak` uses `QUEUE_FLUSH`, so a new line interrupts the old one. The reader
+ignores callbacks whose id is no longer current. The TTS engine needs the
+`android.intent.action.TTS_SERVICE` query in the manifest on Android 11+.
 
 Requirements for the Kotlin implementation (`PdfPageRenderer.kt`):
 

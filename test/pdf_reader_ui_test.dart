@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tablet_browser/pdf/pdf_document.dart';
 import 'package:tablet_browser/pdf/pdf_reader_screen.dart';
 
 /// The PDF reader: one page at a time, turned by tapping the outer thirds or by
@@ -14,13 +15,16 @@ void main() {
   );
 
   final commands = <MethodCall>[];
+  final speechCalls = <MethodCall>[];
   late Map<String, dynamic> answers;
 
   setUp(() {
     commands.clear();
+    speechCalls.clear();
     answers = {
       'pdfPageCount': 3,
       'renderPdfPage': pageBytes,
+      'pdfPageText': null,
     };
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
@@ -28,7 +32,18 @@ void main() {
       (call) async {
         commands.add(call);
         final value = answers[call.method];
-        return value is int ? value : value as Uint8List?;
+        if (value is int) return value;
+        if (value is Map) return Map<String, dynamic>.from(value);
+        return value as Uint8List?;
+      },
+    );
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+      const MethodChannel('tablet_browser/pdf_tts'),
+      (call) async {
+        speechCalls.add(call);
+        if (call.method == 'speak') return 'utt-test';
+        return null;
       },
     );
   });
@@ -37,6 +52,11 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
       const MethodChannel('tablet_browser/commands'),
+      null,
+    );
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+      const MethodChannel('tablet_browser/pdf_tts'),
       null,
     );
   });
@@ -160,5 +180,91 @@ void main() {
     expect(find.textContaining('这个 PDF 打不开'), findsOneWidget);
     expect(find.text('broken'), findsOneWidget, reason: '标题回退到文件名');
     expect(find.byType(PageView), findsNothing);
+  });
+
+  testWidgets('tapping a text line speaks it and highlights it', (tester) async {
+    answers['pdfPageText'] = <String, Object?>{
+      'width': 1000,
+      'height': 1000,
+      'lines': <Object?>[
+        <String, Object?>{
+          'text': '第一行文字',
+          'left': 0.1,
+          'top': 0.1,
+          'right': 0.9,
+          'bottom': 0.2,
+        },
+      ],
+    };
+    await pumpReader(tester);
+
+    // 1x1 render → a 1200×1200 page centred in the 1200×1600 view; the line's
+    // normalised box makes its middle y = 200 + 0.15 × 1200 = 380.
+    await tester.tapAt(const Offset(600, 380));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(indicator(tester), '1 / 3', reason: '点文字不应翻页');
+    expect(find.byKey(pdfSpeechHighlightKey), findsOneWidget);
+    final MethodCall speak = speechCalls.lastWhere((c) => c.method == 'speak');
+    expect((speak.arguments as Map)['text'], '第一行文字');
+    expect((speak.arguments as Map)['rate'], 1.0);
+
+    // The native done callback clears the highlight.
+    await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .handlePlatformMessage(
+      'tablet_browser/pdf_tts',
+      const StandardMethodCodec().encodeMethodCall(
+        const MethodCall('onDone', <String, Object?>{'id': 'utt-test'}),
+      ),
+      (_) {},
+    );
+    await tester.pump();
+    expect(find.byKey(pdfSpeechHighlightKey), findsNothing);
+  });
+
+  testWidgets('the speech rate slider changes the rate sent to the engine',
+      (tester) async {
+    answers['pdfPageText'] = <String, Object?>{
+      'width': 1000,
+      'height': 1000,
+      'lines': <Object?>[
+        <String, Object?>{
+          'text': '朗读这一行',
+          'left': 0.2,
+          'top': 0.3,
+          'right': 0.8,
+          'bottom': 0.4,
+        },
+      ],
+    };
+    await pumpReader(tester);
+
+    final Slider slider = tester.widget<Slider>(find.byType(Slider));
+    slider.onChanged!(1.5);
+    slider.onChangeEnd!(1.5);
+    await tester.pump();
+
+    // Line middle: y = 200 + 0.35 × 1200 = 620.
+    await tester.tapAt(const Offset(600, 620));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    final MethodCall speak = speechCalls.lastWhere((c) => c.method == 'speak');
+    expect((speak.arguments as Map)['rate'], 1.5);
+  });
+
+  testWidgets('a PDF bookmark preview is its first rendered page', (tester) async {
+    final bytes = await PdfDocuments.captureThumbnail(
+      'file:///sdcard/ebooks/说明.pdf',
+    );
+    expect(bytes, pageBytes);
+    final MethodCall render =
+        commands.lastWhere((call) => call.method == 'renderPdfPage');
+    expect(render.arguments, <String, Object?>{
+      'path': '/sdcard/ebooks/说明.pdf',
+      'index': 0,
+      'maxWidth': 480,
+    });
   });
 }

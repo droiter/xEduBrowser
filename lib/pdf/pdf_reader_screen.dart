@@ -1,15 +1,18 @@
 import 'dart:async';
-import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../browser/browser_bridge.dart';
 import 'pdf_document.dart';
+import 'pdf_speech.dart';
 
 /// Test hooks.
 const Key pdfPreviousButtonKey = ValueKey<String>('pdf-previous');
 const Key pdfNextButtonKey = ValueKey<String>('pdf-next');
 const Key pdfPageIndicatorKey = ValueKey<String>('pdf-page-indicator');
+const Key pdfSpeechHighlightKey = ValueKey<String>('pdf-speech-highlight');
 
 /// A PDF bookmark, read page by page.
 ///
@@ -55,6 +58,22 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
   /// with a retry instead of an endless spinner.
   final Set<int> _failed = {};
 
+  /// Text layers, extracted per page on demand. A page with no text (a scan)
+  /// simply has no entry, and taps fall back to the page-turn zones.
+  final Map<int, PdfPageText> _pageTexts = {};
+  final Set<int> _textInFlight = {};
+  final Set<int> _textFailed = {};
+
+  /// Rendered bitmap aspect ratios (height / width), used to place the text
+  /// highlight even before the text layer has loaded.
+  final Map<int, double> _aspects = {};
+
+  /// Reader speech settings and the line currently being spoken.
+  double _speechRate = 1.0;
+  int? _speakingPage;
+  PdfTextLine? _speakingLine;
+  String? _utteranceId;
+
   PdfPager _pager = PdfPager(pageCount: 0);
   bool _loadingDocument = true;
   String? _documentError;
@@ -63,11 +82,15 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
   @override
   void initState() {
     super.initState();
+    PdfSpeech.onEvent = _onSpeechEvent;
     unawaited(_loadDocument());
   }
 
   @override
   void dispose() {
+    PdfSpeech.onEvent = null;
+    unawaited(PdfSpeech.stop());
+    unawaited(BrowserBridge.closePdfText());
     _pages.dispose();
     super.dispose();
   }
@@ -83,7 +106,10 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
       }
       _pager = PdfPager(pageCount: count);
     });
-    if (count > 0) _prefetch(0);
+    if (count > 0) {
+      _prefetch(0);
+      _prefetchText(0);
+    }
   }
 
   /// Renders [index] if it is not cached yet, and remembers it.
@@ -106,6 +132,8 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
           _failed.remove(index);
           _putImage(index, bytes);
         });
+        _prefetchText(index);
+        unawaited(_decodeAspect(index, bytes));
       } finally {
         _inFlight.remove(index);
       }
@@ -124,6 +152,60 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
     }
   }
 
+  /// Loads the text layer of [index] once; failure means "no spoken text here".
+  void _prefetchText(int index) {
+    if (index < 0 || index >= _pager.pageCount) return;
+    if (_pageTexts.containsKey(index) ||
+        _textFailed.contains(index) ||
+        !_textInFlight.add(index)) {
+      return;
+    }
+    unawaited(() async {
+      try {
+        final text = await PdfDocuments.pageText(widget.url, index);
+        if (!mounted) return;
+        setState(() {
+          if (text == null || !text.hasText) {
+            _textFailed.add(index);
+          } else {
+            _pageTexts[index] = text;
+          }
+        });
+      } catch (_) {
+        if (mounted) setState(() => _textFailed.add(index));
+      } finally {
+        _textInFlight.remove(index);
+      }
+    }());
+  }
+
+  /// Remembers the bitmap's real aspect ratio, so the highlight can be placed
+  /// even while the text layer is still loading.
+  Future<void> _decodeAspect(int index, Uint8List bytes) async {
+    try {
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      final int width = frame.image.width;
+      final int height = frame.image.height;
+      frame.image.dispose();
+      codec.dispose();
+      if (!mounted || width <= 0 || height <= 0) return;
+      if (_aspects.containsKey(index)) return;
+      setState(() => _aspects[index] = height / width);
+    } catch (_) {
+      // The page still renders; the fallback aspect ratio is only a placement
+      // guess until the image itself is laid out.
+    }
+  }
+
+  double _aspectOf(int index) {
+    final text = _pageTexts[index];
+    if (text != null && text.width > 0 && text.height > 0) {
+      return text.aspectRatio;
+    }
+    return _aspects[index] ?? 1.414;
+  }
+
   void _goTo(int target) {
     if (!_pager.goTo(target)) return;
     setState(() {});
@@ -137,15 +219,38 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
   }
 
   void _onPageChanged(int index) {
+    if (_speakingPage != null && _speakingPage != index) _stopSpeech();
     _pager.goTo(index);
     setState(() {});
     _prefetch(index);
     _prefetch(index + 1);
     _prefetch(index - 1);
+    _prefetchText(index);
+    _prefetchText(index + 1);
+    _prefetchText(index - 1);
   }
 
-  void _onTapUp(TapUpDetails details, double width) {
-    switch (PdfPager.zoneForTap(details.localPosition.dx, width)) {
+  /// A tap on a text line speaks it; everywhere else keeps the page-turn zones.
+  void _onPageTap(
+    Offset local,
+    Rect imageRect,
+    PdfPageText? text,
+    int index,
+    double areaWidth,
+  ) {
+    if (text != null &&
+        imageRect.width > 0 &&
+        imageRect.height > 0 &&
+        imageRect.contains(local)) {
+      final double x = (local.dx - imageRect.left) / imageRect.width;
+      final double y = (local.dy - imageRect.top) / imageRect.height;
+      final PdfTextLine? line = text.lineAt(x, y);
+      if (line != null) {
+        unawaited(_speakLine(index, line));
+        return;
+      }
+    }
+    switch (PdfPager.zoneForTap(local.dx, areaWidth)) {
       case PdfTapZone.previous:
         _goTo(_pager.index - 1);
       case PdfTapZone.next:
@@ -153,6 +258,90 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
       case PdfTapZone.toggleChrome:
         setState(() => _chromeVisible = !_chromeVisible);
     }
+  }
+
+  // ------------------------------------------------------------- speech
+
+  /// Incremented for every new utterance so a late `speak` reply cannot install
+  /// an id for a line that was replaced in the meantime.
+  int _speechRequest = 0;
+
+  /// Utterances the reader no longer cares about; their callbacks are ignored.
+  final Set<String> _retiredUtterances = <String>{};
+
+  Future<void> _speakLine(int index, PdfTextLine line) async {
+    final int request = ++_speechRequest;
+    final String? previous = _utteranceId;
+    if (previous != null) _retiredUtterances.add(previous);
+    if (_retiredUtterances.length > 20) _retiredUtterances.clear();
+    setState(() {
+      _speakingPage = index;
+      _speakingLine = line;
+      _utteranceId = null;
+    });
+    try {
+      final String id = await PdfSpeech.speak(line.text, rate: _speechRate);
+      if (!mounted || request != _speechRequest) return;
+      setState(() => _utteranceId = id);
+    } on PlatformException catch (error) {
+      if (!mounted || request != _speechRequest) return;
+      _clearSpeech();
+      _speechError(error.message ?? '语音播放失败，请检查系统的语音引擎');
+    } on MissingPluginException {
+      if (!mounted || request != _speechRequest) return;
+      _clearSpeech();
+      _speechError('当前设备没有语音引擎，无法朗读');
+    }
+  }
+
+  void _onSpeechEvent(String id, PdfSpeechState state) {
+    if (!mounted || state == PdfSpeechState.started) return;
+    if (_retiredUtterances.remove(id)) return;
+    if (_utteranceId != null && id.isNotEmpty && id != _utteranceId) return;
+    _speechRequest++;
+    _clearSpeech();
+    if (state == PdfSpeechState.error) {
+      _speechError('语音播放失败，请检查系统的语音引擎');
+    }
+  }
+
+  void _clearSpeech() {
+    if (_speakingLine == null && _utteranceId == null) return;
+    setState(() {
+      _speakingLine = null;
+      _speakingPage = null;
+      _utteranceId = null;
+    });
+  }
+
+  void _stopSpeech() {
+    final String? current = _utteranceId;
+    if (current != null) _retiredUtterances.add(current);
+    _speechRequest++;
+    _clearSpeech();
+    unawaited(PdfSpeech.stop());
+  }
+
+  void _speechError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _onSpeechRateChanged(double value) {
+    setState(() => _speechRate = value);
+  }
+
+  Future<void> _onSpeechRateCommitted(double value) async {
+    try {
+      await PdfSpeech.setRate(value);
+    } catch (_) {
+      // The rate is only a preference; the next speak() passes it again.
+    }
+    final PdfTextLine? line = _speakingLine;
+    final int? page = _speakingPage;
+    if (line != null && page != null) unawaited(_speakLine(page, line));
   }
 
   @override
@@ -211,75 +400,213 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
       itemCount: _pager.pageCount,
       onPageChanged: _onPageChanged,
       itemBuilder: (context, index) {
-        final bytes = _images[index];
-        final Widget page;
-        if (_failed.contains(index)) {
-          page = _FailedPage(
-            index: index,
-            onRetry: () {
-              setState(() => _failed.remove(index));
-              _prefetch(index);
-            },
-          );
-        } else if (bytes == null) {
-          page = _Rendering(index: index);
-        } else {
-          // No InteractiveViewer here: it would compete with the PageView for
-          // horizontal drags, and swiping is how pages are turned.
-          page = Center(
-            child: Image.memory(
-              bytes,
-              fit: BoxFit.contain,
-              gaplessPlayback: true,
-            ),
-          );
-        }
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapUp: (details) => _onTapUp(details, width),
-          child: page,
+        return LayoutBuilder(
+          builder: (BuildContext context, BoxConstraints constraints) {
+            final Size area = Size(constraints.maxWidth, constraints.maxHeight);
+            final Uint8List? bytes = _images[index];
+            final PdfPageText? text = _pageTexts[index];
+            final Widget page;
+            Rect imageRect = Rect.zero;
+            if (_failed.contains(index)) {
+              page = _FailedPage(
+                index: index,
+                onRetry: () {
+                  setState(() => _failed.remove(index));
+                  _prefetch(index);
+                },
+              );
+            } else if (bytes == null) {
+              page = _Rendering(index: index);
+            } else {
+              // No InteractiveViewer here: it would compete with the PageView
+              // for horizontal drags, and swiping is how pages are turned.
+              imageRect = _containRect(area, _aspectOf(index));
+              page = Stack(
+                children: <Widget>[
+                  Positioned.fromRect(
+                    rect: imageRect,
+                    child: Image.memory(
+                      bytes,
+                      fit: BoxFit.fill,
+                      gaplessPlayback: true,
+                    ),
+                  ),
+                  if (_speakingPage == index && _speakingLine != null)
+                    _highlightFor(_speakingLine!, imageRect),
+                ],
+              );
+            }
+            return GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTapUp: (TapUpDetails details) => _onPageTap(
+                details.localPosition,
+                imageRect,
+                text,
+                index,
+                width,
+              ),
+              child: page,
+            );
+          },
         );
       },
     );
   }
 
+  /// Where a page of [aspectRatio] (height / width) sits inside [area] when
+  /// fitted with `BoxFit.contain`.
+  Rect _containRect(Size area, double aspectRatio) {
+    if (area.width <= 0 || area.height <= 0) return Rect.zero;
+    final double aspect = aspectRatio > 0 ? aspectRatio : 1.414;
+    double width = area.width;
+    double height = width * aspect;
+    if (height > area.height) {
+      height = area.height;
+      width = height / aspect;
+    }
+    return Rect.fromLTWH(
+      (area.width - width) / 2,
+      (area.height - height) / 2,
+      width,
+      height,
+    );
+  }
+
+  /// Paints the yellow highlight over the line being spoken.
+  Widget _highlightFor(PdfTextLine line, Rect imageRect) {
+    final Rect rect = Rect.fromLTWH(
+      imageRect.left + line.left * imageRect.width,
+      imageRect.top + line.top * imageRect.height,
+      line.width * imageRect.width,
+      line.height * imageRect.height,
+    );
+    return Positioned.fromRect(
+      rect: rect,
+      child: IgnorePointer(
+        child: DecoratedBox(
+          key: pdfSpeechHighlightKey,
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFD54F).withValues(alpha: 0.55),
+            borderRadius: BorderRadius.circular(3),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _bottomBar(BuildContext context) {
-    return BottomAppBar(
+    final bool noText = _textFailed.contains(_pager.index);
+    return Material(
       color: Colors.black87,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          IconButton(
-            key: pdfPreviousButtonKey,
-            tooltip: '上一页',
-            color: Colors.white,
-            onPressed: _pager.canGoPrevious ? () => _goTo(_pager.index - 1) : null,
-            icon: const Icon(Icons.chevron_left),
+      elevation: 8,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 2),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  IconButton(
+                    key: pdfPreviousButtonKey,
+                    tooltip: '上一页',
+                    color: Colors.white,
+                    onPressed:
+                        _pager.canGoPrevious ? () => _goTo(_pager.index - 1) : null,
+                    icon: const Icon(Icons.chevron_left),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text(
+                      _pager.label,
+                      key: pdfPageIndicatorKey,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontFeatures: <FontFeature>[FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    key: pdfNextButtonKey,
+                    tooltip: '下一页',
+                    color: Colors.white,
+                    onPressed:
+                        _pager.canGoNext ? () => _goTo(_pager.index + 1) : null,
+                    icon: const Icon(Icons.chevron_right),
+                  ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 16),
+                      child: Text(
+                        noText
+                            ? '本页没有可朗读的文字；左右两侧翻页'
+                            : '点文字朗读；左右两侧翻页，中间空白处显示或隐藏工具栏',
+                        textAlign: TextAlign.end,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.6),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              Row(
+                children: <Widget>[
+                  const SizedBox(width: 14),
+                  const Icon(
+                    Icons.record_voice_over_outlined,
+                    color: Colors.white70,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    '朗读语速',
+                    style: TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                  Expanded(
+                    child: SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        trackHeight: 2,
+                        activeTrackColor: Colors.white70,
+                        inactiveTrackColor: Colors.white24,
+                        thumbColor: Colors.white,
+                        overlayColor: Colors.white12,
+                      ),
+                      child: Slider(
+                        value: _speechRate,
+                        min: 0.5,
+                        max: 2.0,
+                        divisions: 6,
+                        label: '${_speechRate.toStringAsFixed(2)}x',
+                        onChanged: _onSpeechRateChanged,
+                        onChangeEnd: (double value) =>
+                            unawaited(_onSpeechRateCommitted(value)),
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 46,
+                    child: Text(
+                      '${_speechRate.toStringAsFixed(2)}x',
+                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '停止朗读',
+                    color: Colors.white,
+                    onPressed: _speakingLine == null ? null : _stopSpeech,
+                    icon: const Icon(Icons.stop_circle_outlined),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+              ),
+            ],
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              _pager.label,
-              key: pdfPageIndicatorKey,
-              style: const TextStyle(color: Colors.white, fontFeatures: [FontFeature.tabularFigures()]),
-            ),
-          ),
-          IconButton(
-            key: pdfNextButtonKey,
-            tooltip: '下一页',
-            color: Colors.white,
-            onPressed: _pager.canGoNext ? () => _goTo(_pager.index + 1) : null,
-            icon: const Icon(Icons.chevron_right),
-          ),
-          const Spacer(),
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: Text(
-              '点左侧/右侧翻页，中间显示或隐藏工具栏',
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 12),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

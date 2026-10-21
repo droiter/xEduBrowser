@@ -80,6 +80,74 @@ void main() {
     });
   });
 
+  group('PdfPageText', () {
+    test('parses normalised lines and hit-tests a tap', () {
+      final PdfPageText? page = PdfPageText.fromMap(<String, dynamic>{
+        'width': 595.0,
+        'height': 842.0,
+        'lines': <Object?>[
+          <String, Object?>{
+            'text': ' 第一行 ',
+            'left': 0.1,
+            'top': 0.2,
+            'right': 0.6,
+            'bottom': 0.25,
+          },
+          <String, Object?>{
+            'text': '第二行',
+            'left': 0.1,
+            'top': 0.3,
+            'right': 0.9,
+            'bottom': 0.35,
+          },
+        ],
+      });
+      expect(page, isNotNull);
+      expect(page!.hasText, isTrue);
+      expect(page.lines.first.text, '第一行');
+      expect(page.aspectRatio, closeTo(842 / 595, 0.0001));
+      expect(page.lineAt(0.2, 0.22)?.text, '第一行');
+      expect(page.lineAt(0.8, 0.32)?.text, '第二行');
+      expect(page.lineAt(0.95, 0.22), isNull);
+    });
+
+    test('drops malformed lines and falls back without a page size', () {
+      expect(PdfPageText.fromMap(<String, dynamic>{'lines': <Object?>[]}), isNull);
+      final page = PdfPageText.fromMap(<String, dynamic>{
+        'width': 0,
+        'height': 0,
+        'lines': <Object?>[
+          <String, Object?>{
+            'text': '只有文字',
+            'left': 0.2,
+            'top': 0.4,
+            'right': 0.5,
+            'bottom': 0.45,
+          },
+          <String, Object?>{
+            'text': '',
+            'left': 0.1,
+            'top': 0.1,
+            'right': 0.2,
+            'bottom': 0.2,
+          },
+          <String, Object?>{
+            'text': '倒过来',
+            'left': 0.8,
+            'top': 0.8,
+            'right': 0.2,
+            'bottom': 0.9,
+          },
+        ],
+      });
+      expect(page, isNotNull);
+      expect(page!.lines, hasLength(1));
+      expect(page.lines.single.text, '只有文字');
+      expect(page.width, greaterThan(0));
+      expect(page.height, greaterThan(0));
+    });
+  });
+
   group('whitelist grant', () {
     test('a PDF grants the file itself, not its whole folder', () {
       // The reader opens the file directly, so the sibling pages of a course

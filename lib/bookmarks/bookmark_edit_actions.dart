@@ -86,21 +86,27 @@ abstract final class BookmarkEditActions {
   }
 
   /// Force a fresh preview image, replacing whatever the tile shows now.
+  ///
+  /// A PDF gets its first page rendered by the native PDF renderer; a web page is
+  /// photographed in a throwaway WebView.
   static Future<void> regenerateThumbnail(
     BuildContext context,
     AppState state,
     Bookmark bookmark,
   ) async {
-    if (PdfDocuments.localPathOf(bookmark.url) != null) {
-      showAppSnackBar(context, 'PDF 由阅读器按页显示，不生成预览图');
-      return;
-    }
+    final bool isPdf = PdfDocuments.localPathOf(bookmark.url) != null;
     showAppSnackBar(context, '正在重新生成「${bookmark.displayTitle}」的预览图…');
-    final bytes = await captureThumbnailFor(context, url: bookmark.url);
+    final bytes = isPdf
+        ? await PdfDocuments.captureThumbnail(bookmark.url)
+        : await captureThumbnailFor(context, url: bookmark.url);
     if (!context.mounted) return;
     final current = state.bookmarkFor(bookmark.url);
     if (bytes == null || bytes.isEmpty || current == null) {
-      showAppSnackBar(context, '没能生成预览图，请确认该页面能正常打开后重试', isError: true);
+      showAppSnackBar(
+        context,
+        isPdf ? '没能生成 PDF 首页预览图，请确认这个 PDF 能正常打开后重试' : '没能生成预览图，请确认该页面能正常打开后重试',
+        isError: true,
+      );
       return;
     }
     await state.setBookmarkThumbnail(current, bytes);

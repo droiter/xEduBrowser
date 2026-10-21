@@ -299,21 +299,24 @@ class _BookmarkManagerCardState extends State<BookmarkManagerCard> {
 
   /// Generates the preview image of a freshly added bookmark.
   ///
-  /// The page is loaded in a throwaway WebView (see [captureThumbnailFor]) so the
-  /// home page shows the real page immediately, rather than the generated
-  /// monogram until the bookmark is opened for the first time. A failed capture
-  /// changes nothing: the bookmark keeps its monogram and the usual first-open
-  /// capture still fills the preview in later.
+  /// A web page is loaded in a throwaway WebView (see [captureThumbnailFor]); a
+  /// PDF has its first page rendered by the same native renderer the reader uses.
+  /// Either way the home page shows a real picture immediately, rather than the
+  /// generated monogram until the bookmark is opened for the first time. A failed
+  /// capture changes nothing: the bookmark keeps its monogram and the usual
+  /// first-open capture still fills the preview in later.
   Future<void> _captureAddedPreview(AppState state, Bookmark bookmark) async {
     if (!mounted) return;
-    // A PDF is read page by page by the built-in reader and Android's WebView
-    // cannot render one, so there is nothing to photograph — and nothing to
-    // promise the user either.
-    if (PdfDocuments.localPathOf(bookmark.url) != null) return;
-    final bytes = await captureThumbnailFor(context, url: bookmark.url);
+    final bool isPdf = PdfDocuments.localPathOf(bookmark.url) != null;
+    final bytes = isPdf
+        ? await PdfDocuments.captureThumbnail(bookmark.url)
+        : await captureThumbnailFor(context, url: bookmark.url);
     if (!mounted) return;
     if (bytes == null || bytes.isEmpty) {
-      showAppSnackBar(context, '暂时截不到预览图，打开该页面时会自动生成');
+      showAppSnackBar(
+        context,
+        isPdf ? '暂时生成不了 PDF 首页预览图，稍后可在书签管理里重试' : '暂时截不到预览图，打开该页面时会自动生成',
+      );
       return;
     }
     // The bookmark may have been deleted while the page was loading.
@@ -490,9 +493,7 @@ class _BookmarkRow extends StatelessWidget {
           const SizedBox(height: 2),
           Text(
             thumbnail == null || thumbnail.isEmpty
-                ? (PdfDocuments.localPathOf(bookmark.url) != null
-                    ? '预览图：PDF 不生成预览图'
-                    : '预览图：还没生成，打开该页面即可生成')
+                ? '预览图：还没生成，打开该页面即可生成'
                 : '预览图：已生成，打开该页面会刷新',
             style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
           ),

@@ -39,14 +39,16 @@ class ThumbnailCaptureRequest {
 ///
 /// The service itself never touches a WebView. It publishes [request] and the
 /// shell mounts [ThumbnailCaptureHost] for it; when that host reports back,
-/// [complete] stores the image and schedules the next round. That split is what
-/// keeps this testable: the decisions live here, the pixels live in the host.
+/// [complete] stores the image and schedules the next round. A PDF has no
+/// WebView at all: when [renderPdfThumbnail] is supplied the service calls it
+/// directly (native first-page render) and stores the bytes the same way.
 class ThumbnailBackfill extends ChangeNotifier {
   ThumbnailBackfill({
     required this.candidates,
     required this.save,
     required this.log,
     required this.isEnabled,
+    this.renderPdfThumbnail,
     this.gap = const Duration(seconds: 45),
     this.idleBeforeStart = const Duration(seconds: 20),
     this.retryCooldown = const Duration(minutes: 30),
@@ -57,6 +59,10 @@ class ThumbnailBackfill extends ChangeNotifier {
   })  : _allocateViewId = allocateViewId ?? nextPlatformViewId,
         _scheduleTimer = scheduleTimer ?? ((delay, callback) => Timer(delay, callback)),
         _clock = clock ?? DateTime.now;
+
+  /// Renders a PDF bookmark's first page, or null when the caller does not
+  /// support PDF previews (unit tests) / the document cannot be read.
+  final Future<Uint8List?> Function(Bookmark bookmark)? renderPdfThumbnail;
 
   /// Whether a one-click batch is running right now.
   ///
@@ -153,6 +159,9 @@ class ThumbnailBackfill extends ChangeNotifier {
 
   Timer? _timer;
   ThumbnailCaptureRequest? _request;
+
+  /// A direct (WebView-free) PDF page render is in flight.
+  bool _pdfInFlight = false;
   bool _foreground = true;
   bool _disposed = false;
 
@@ -209,11 +218,35 @@ class ThumbnailBackfill extends ChangeNotifier {
     if (request == null) return;
     _request = null;
     _notify();
+    await _storeCapture(request.bookmarkId, bytes);
+  }
+
+  /// Renders a PDF's first page directly, without the WebView host.
+  Future<void> _capturePdf(Bookmark bookmark) async {
+    final render = renderPdfThumbnail;
+    if (render == null) return;
+    _pdfInFlight = true;
+    Uint8List? bytes;
+    try {
+      bytes = await render(bookmark).timeout(captureTimeout);
+    } catch (error) {
+      log('capture', '后台补 PDF 预览图失败：「${bookmark.displayTitle}」$error', warn: true);
+      bytes = null;
+    } finally {
+      _pdfInFlight = false;
+    }
+    if (_disposed) return;
+    await _storeCapture(bookmark.id, bytes);
+  }
+
+  /// Shared tail of both capture paths: count, save, cool a failure down and
+  /// schedule the next round.
+  Future<void> _storeCapture(String bookmarkId, Uint8List? bytes) async {
     if (_disposed) return;
     _batch?.done++;
     _notify();
 
-    final bookmark = _bookmarkById(request.bookmarkId);
+    final bookmark = _bookmarkById(bookmarkId);
     if (bookmark == null) {
       // Deleted while the capture was in flight: nothing to store.
       _scheduleNext();
@@ -221,10 +254,10 @@ class ThumbnailBackfill extends ChangeNotifier {
     }
     if (bytes == null || bytes.isEmpty) {
       _failed++;
-      _cooldownUntil[request.bookmarkId] = _clock().add(retryCooldown);
+      _cooldownUntil[bookmarkId] = _clock().add(retryCooldown);
       log(
         'capture',
-        '后台补预览图失败：「${bookmark.displayTitle}」截图为空，'
+        '后台补预览图失败：「${bookmark.displayTitle}」预览图为空，'
         '${retryCooldown.inMinutes} 分钟后再试'
         '（本轮成功 $_done 张，失败 $_failed 张）',
         warn: true,
@@ -235,7 +268,7 @@ class ThumbnailBackfill extends ChangeNotifier {
     try {
       await save(bookmark, bytes);
       _done++;
-      _cooldownUntil.remove(request.bookmarkId);
+      _cooldownUntil.remove(bookmarkId);
       log(
         'capture',
         '后台补预览图完成：「${bookmark.displayTitle}」'
@@ -243,7 +276,7 @@ class ThumbnailBackfill extends ChangeNotifier {
       );
     } catch (error) {
       _failed++;
-      _cooldownUntil[request.bookmarkId] = _clock().add(retryCooldown);
+      _cooldownUntil[bookmarkId] = _clock().add(retryCooldown);
       log('capture', '后台补预览图写入失败：「${bookmark.displayTitle}」$error', warn: true);
     }
     _scheduleNext();
@@ -287,16 +320,17 @@ class ThumbnailBackfill extends ChangeNotifier {
     return out;
   }
 
-  /// Whether a URL can be photographed at all by the WebView.
+  /// Whether a URL can be given a preview at all.
   ///
-  /// The start page is not a document, an empty address has nothing to load, and
-  /// a PDF is drawn by the built-in reader — Android's WebView cannot show one,
-  /// so a capture would only ever produce a blank frame. Those tiles keep their
-  /// letter monogram, exactly as before this background pass existed.
+  /// The start page is not a document and an empty address has nothing to load.
+  /// A PDF cannot be photographed by the WebView, but when [renderPdfThumbnail]
+  /// is supplied the native page renderer makes its first page instead.
   bool _capturable(String url) {
     final target = url.trim();
     if (target.isEmpty || target == UrlResolver.homeUrl) return false;
-    if (PdfDocuments.localPathOf(target) != null) return false;
+    if (PdfDocuments.localPathOf(target) != null) {
+      return renderPdfThumbnail != null;
+    }
     return true;
   }
 
@@ -309,8 +343,8 @@ class ThumbnailBackfill extends ChangeNotifier {
   void _tick() {
     _timer = null;
     if (_disposed) return;
-    if (_request != null) {
-      // A capture is still in flight; the host will call complete().
+    if (_request != null || _pdfInFlight) {
+      // A capture is still in flight; complete() will schedule the next tick.
       return;
     }
     if (!_foreground) return;
@@ -345,6 +379,15 @@ class ThumbnailBackfill extends ChangeNotifier {
     }
     _loggedIdle = false;
     final next = pending.first;
+    if (PdfDocuments.localPathOf(next.url) != null) {
+      log(
+        'capture',
+        '${batch != null ? '一键补图' : '后台补预览图'}开始：「${next.displayTitle}」'
+        '（PDF 首页，待补 ${pending.length} 个，已完成 $_done 个，失败的 $_failed 个）',
+      );
+      unawaited(_capturePdf(next));
+      return;
+    }
     _request = ThumbnailCaptureRequest(
       viewId: _allocateViewId(),
       bookmarkId: next.id,
