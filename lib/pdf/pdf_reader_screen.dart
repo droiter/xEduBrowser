@@ -15,6 +15,9 @@ const Key pdfNextButtonKey = ValueKey<String>('pdf-next');
 const Key pdfPageIndicatorKey = ValueKey<String>('pdf-page-indicator');
 const Key pdfSpeechHighlightKey = ValueKey<String>('pdf-speech-highlight');
 
+/// The `1.00x` reading-speed readout next to the title.
+const Key pdfSpeechRateLabelKey = ValueKey<String>('pdf-speech-rate-label');
+
 /// A PDF bookmark, read page by page.
 ///
 /// Android's WebView cannot display a PDF, so the native side renders one page
@@ -594,9 +597,35 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: _chromeVisible ? AppBar(title: Text(_titleLine)) : null,
+      appBar: _chromeVisible ? _appBar(context) : null,
       body: SafeArea(child: _body(context)),
       bottomNavigationBar: _chromeVisible ? _bottomBar(context) : null,
+    );
+  }
+
+  /// Title, page counter and reading speed on **one** line.
+  ///
+  /// Both numbers used to live in the bottom bar, which then needed two rows
+  /// and ate into the page. On the title line they cost no height at all, so
+  /// the bottom strip is a single row of controls and the page gets the rest.
+  PreferredSizeWidget _appBar(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final TextStyle? metrics = theme.textTheme.titleSmall?.copyWith(
+      fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+    );
+    return AppBar(
+      titleSpacing: 16,
+      title: Text(_titleLine, maxLines: 1, overflow: TextOverflow.ellipsis),
+      actions: <Widget>[
+        Text(_pager.label, key: pdfPageIndicatorKey, style: metrics),
+        const SizedBox(width: 16),
+        Text(
+          '${_speechRate.toStringAsFixed(2)}x',
+          key: pdfSpeechRateLabelKey,
+          style: metrics,
+        ),
+        const SizedBox(width: 18),
+      ],
     );
   }
 
@@ -738,116 +767,77 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
     );
   }
 
+  /// One compact row: turn the page, set the reading speed, stop the speech.
+  ///
+  /// The page counter and the speed value are on the title line (see [_appBar]),
+  /// so this strip only carries what needs a finger.
   Widget _bottomBar(BuildContext context) {
-    final bool noText = _textFailed.contains(_pager.index);
     return Material(
       color: Colors.black87,
       elevation: 8,
       child: SafeArea(
         top: false,
-        child: Padding(
-          padding: const EdgeInsets.only(bottom: 2),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+        // An explicit height: a [Slider] in an unbounded-height [Row] would
+        // otherwise claim the whole screen and squeeze the page out of layout.
+        child: SizedBox(
+          height: 48,
+          child: Row(
             children: <Widget>[
-              Row(
-                children: <Widget>[
-                  IconButton(
-                    key: pdfPreviousButtonKey,
-                    tooltip: '上一页',
-                    color: Colors.white,
-                    onPressed:
-                        _pager.canGoPrevious ? () => _goTo(_pager.index - 1) : null,
-                    icon: const Icon(Icons.chevron_left),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(
-                      _pager.label,
-                      key: pdfPageIndicatorKey,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontFeatures: <FontFeature>[FontFeature.tabularFigures()],
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    key: pdfNextButtonKey,
-                    tooltip: '下一页',
-                    color: Colors.white,
-                    onPressed:
-                        _pager.canGoNext ? () => _goTo(_pager.index + 1) : null,
-                    icon: const Icon(Icons.chevron_right),
-                  ),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: 16),
-                      child: Text(
-                        noText
-                            ? '本页没有可朗读的文字；左右两侧翻页'
-                            : '点文字朗读；左右两侧翻页，中间空白处显示或隐藏工具栏',
-                        textAlign: TextAlign.end,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.6),
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+              IconButton(
+                key: pdfPreviousButtonKey,
+                tooltip: '上一页',
+                color: Colors.white,
+                onPressed: _pager.canGoPrevious
+                    ? () => _goTo(_pager.index - 1)
+                    : null,
+                icon: const Icon(Icons.chevron_left),
               ),
-              Row(
-                children: <Widget>[
-                  const SizedBox(width: 14),
-                  const Icon(
-                    Icons.record_voice_over_outlined,
-                    color: Colors.white70,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  const Text(
-                    '朗读语速',
-                    style: TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                  Expanded(
-                    child: SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        trackHeight: 2,
-                        activeTrackColor: Colors.white70,
-                        inactiveTrackColor: Colors.white24,
-                        thumbColor: Colors.white,
-                        overlayColor: Colors.white12,
-                      ),
-                      child: Slider(
-                        value: _speechRate,
-                        min: 0.5,
-                        max: 2.0,
-                        divisions: 6,
-                        label: '${_speechRate.toStringAsFixed(2)}x',
-                        onChanged: _onSpeechRateChanged,
-                        onChangeEnd: (double value) =>
-                            unawaited(_onSpeechRateCommitted(value)),
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: 46,
-                    child: Text(
-                      '${_speechRate.toStringAsFixed(2)}x',
-                      style: const TextStyle(color: Colors.white70, fontSize: 12),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: '停止朗读',
-                    color: Colors.white,
-                    onPressed: _speakingLine == null ? null : _stopSpeech,
-                    icon: const Icon(Icons.stop_circle_outlined),
-                  ),
-                  const SizedBox(width: 6),
-                ],
+              const Tooltip(
+                message: '朗读语速',
+                child: Icon(
+                  Icons.record_voice_over_outlined,
+                  color: Colors.white70,
+                  size: 20,
+                ),
               ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 2,
+                    activeTrackColor: Colors.white70,
+                    inactiveTrackColor: Colors.white24,
+                    thumbColor: Colors.white,
+                    overlayColor: Colors.white12,
+                  ),
+                  child: Slider(
+                    value: _speechRate,
+                    min: 0.5,
+                    max: 2.0,
+                    divisions: 6,
+                    label: '${_speechRate.toStringAsFixed(2)}x',
+                    onChanged: _onSpeechRateChanged,
+                    onChangeEnd: (double value) =>
+                        unawaited(_onSpeechRateCommitted(value)),
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: '停止朗读',
+                color: Colors.white,
+                onPressed: _speakingLine == null ? null : _stopSpeech,
+                icon: const Icon(Icons.stop_circle_outlined),
+              ),
+              IconButton(
+                key: pdfNextButtonKey,
+                tooltip: '下一页',
+                color: Colors.white,
+                onPressed: _pager.canGoNext
+                    ? () => _goTo(_pager.index + 1)
+                    : null,
+                icon: const Icon(Icons.chevron_right),
+              ),
+              const SizedBox(width: 4),
             ],
           ),
         ),

@@ -242,6 +242,41 @@ void main() {
     expect(find.byKey(pdfSpeechHighlightKey), findsNothing);
   });
 
+  testWidgets('页码和朗读倍数与标题齐平，底栏只占一行', (tester) async {
+    await pumpReader(tester);
+
+    final Finder title = find.text('使用说明');
+    final Finder pageLabel = find.byKey(pdfPageIndicatorKey);
+    final Finder speed = find.byKey(pdfSpeechRateLabelKey);
+    expect(title, findsOneWidget);
+    expect(pageLabel, findsOneWidget);
+    expect(speed, findsOneWidget);
+    expect(tester.widget<Text>(pageLabel).data, '1 / 3');
+    expect(tester.widget<Text>(speed).data, '1.00x');
+
+    // Both sit in the app bar, on the title's line.
+    expect(
+      find.descendant(of: find.byType(AppBar), matching: pageLabel),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: find.byType(AppBar), matching: speed),
+      findsOneWidget,
+    );
+    final double titleY = tester.getCenter(title).dy;
+    expect((tester.getCenter(pageLabel).dy - titleY).abs(), lessThan(1.5));
+    expect((tester.getCenter(speed).dy - titleY).abs(), lessThan(1.5));
+
+    // The bottom strip is a single row: buttons and slider share one line.
+    final double previousY = tester.getCenter(find.byKey(pdfPreviousButtonKey)).dy;
+    final double nextY = tester.getCenter(find.byKey(pdfNextButtonKey)).dy;
+    final double sliderY = tester.getCenter(find.byType(Slider)).dy;
+    expect(previousY, moreOrLessEquals(nextY, epsilon: 1));
+    expect(previousY, moreOrLessEquals(sliderY, epsilon: 2));
+    // Nothing from the old second row survives over the page.
+    expect(find.text('朗读语速'), findsNothing);
+  });
+
   testWidgets('the speech rate slider changes the rate sent to the engine',
       (tester) async {
     answers['pdfPageText'] = <String, Object?>{
@@ -263,6 +298,8 @@ void main() {
     slider.onChanged!(1.5);
     slider.onChangeEnd!(1.5);
     await tester.pump();
+    // The readout next to the title follows the slider.
+    expect(tester.widget<Text>(find.byKey(pdfSpeechRateLabelKey)).data, '1.50x');
 
     // Line middle: y = 200 + 0.35 × 1200 = 620.
     await tester.tapAt(const Offset(600, 620));
