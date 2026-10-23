@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -81,6 +82,22 @@ void main() {
 
   String indicator(WidgetTester tester) =>
       tester.widget<Text>(find.byKey(pdfPageIndicatorKey)).data ?? '';
+
+  /// Replaces the shared command handler for one test, still recording [commands].
+  void mockCommandHandler(Future<Object?> Function(MethodCall call) handler) {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+      const MethodChannel('tablet_browser/commands'),
+      (call) {
+        commands.add(call);
+        return handler(call);
+      },
+    );
+  }
+
+  /// Every `renderPdfPage` request sent so far, in order.
+  List<MethodCall> renderCalls() =>
+      commands.where((call) => call.method == 'renderPdfPage').toList();
 
   testWidgets('shows the first page and the page count', (tester) async {
     await pumpReader(tester);
@@ -252,6 +269,89 @@ void main() {
 
     final MethodCall speak = speechCalls.lastWhere((c) => c.method == 'speak');
     expect((speak.arguments as Map)['rate'], 1.5);
+  });
+
+  testWidgets('renders one page at a time, and the page on screen first',
+      (tester) async {
+    // Each request hangs until the test completes it: this is the slow-reader
+    // situation that used to stack up a render backlog.
+    final pending = <int, Completer<Uint8List?>>{};
+    mockCommandHandler((call) async {
+      switch (call.method) {
+        case 'pdfPageCount':
+          return 6;
+        case 'renderPdfPage':
+          final Map<Object?, Object?> args =
+              Map<Object?, Object?>.from(call.arguments as Map);
+          final int index = args['index'] as int;
+          final Completer<Uint8List?> completer = Completer<Uint8List?>();
+          pending[index] = completer;
+          return completer.future;
+        default:
+          return null;
+      }
+    });
+
+    await pumpReader(tester);
+    expect(find.text('正在渲染第 1 页…'), findsOneWidget);
+
+    // Flip three pages while the first render is still unanswered: no new
+    // request goes out, so nothing piles up behind the page being waited for.
+    final Rect page = tester.getRect(find.byType(PageView));
+    for (var i = 0; i < 3; i++) {
+      await tester.tapAt(Offset(page.right - 20, page.center.dy));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 260));
+    }
+    expect(indicator(tester), '4 / 6');
+    expect(renderCalls(), hasLength(1), reason: '一次只渲染一页，翻页不再排队');
+
+    // The first render finally lands: the page now on screen (4th) must be
+    // rendered next, not the pages already flipped past.
+    pending[0]!.complete(pageBytes);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    final MethodCall next = renderCalls().last;
+    expect(
+      (next.arguments as Map<Object?, Object?>)['index'],
+      3,
+      reason: '屏幕上的页优先于翻过的页',
+    );
+  });
+
+  testWidgets('a render that never answers becomes 重试, not an endless spinner',
+      (tester) async {
+    var wedged = true;
+    mockCommandHandler((call) async {
+      switch (call.method) {
+        case 'pdfPageCount':
+          return 3;
+        case 'renderPdfPage':
+          return wedged
+              ? Completer<Uint8List?>().future
+              : Future<Uint8List?>.value(pageBytes);
+        default:
+          return null;
+      }
+    });
+
+    await pumpReader(tester);
+    expect(find.text('正在渲染第 1 页…'), findsOneWidget);
+
+    // The watchdog gives up on a render that never replies.
+    await tester.pump(const Duration(seconds: 21));
+    expect(find.text('第 1 页渲染失败'), findsOneWidget);
+    expect(find.text('重试'), findsOneWidget);
+    expect(find.text('正在渲染第 1 页…'), findsNothing);
+
+    // 重试 preempts whatever is (not) rendering and shows the page.
+    wedged = false;
+    await tester.tap(find.text('重试'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.text('第 1 页渲染失败'), findsNothing);
+    expect(find.byType(Image), findsWidgets);
   });
 
   testWidgets('a PDF bookmark preview is its first rendered page', (tester) async {

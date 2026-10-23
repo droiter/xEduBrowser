@@ -52,7 +52,38 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
   final PageController _pages = PageController();
   final Map<int, Uint8List> _images = {};
   final List<int> _cacheOrder = [];
-  final Set<int> _inFlight = {};
+
+  /// The page whose bytes the platform is rendering right now, if any.
+  ///
+  /// Requests go out **one at a time**. The platform renderer is a single
+  /// worker, so queueing every page the reader flips past built a backlog that
+  /// the page on screen had to wait behind: the reader then sat on 「正在渲染
+  /// 第 N 页」 for as long as the backlog took, and going away and back worked
+  /// only because the page had been rendered in the meantime.
+  int? _rendering;
+
+  /// Pages to render after [_rendering], most wanted first.
+  ///
+  /// Never more than the page on screen and its two neighbours: a page change
+  /// rebuilds this list, dropping whatever the reader has already left behind.
+  final List<int> _renderQueue = [];
+
+  /// Renders started so far. A reply from a request the reader has given up on
+  /// (see [_renderTimeout]) carries an older token and is ignored.
+  int _renderSeq = 0;
+
+  Timer? _renderWatchdog;
+
+  /// How long a render may stay unanswered before it is treated as failed.
+  ///
+  /// A healthy render takes well under a second, and opening a very large
+  /// document is the slow part on the platform side; this only catches a wedged
+  /// renderer, turning an endless spinner into a 重试 button.
+  static const Duration _renderTimeout = Duration(seconds: 20);
+
+  /// A frame post-callback that re-requests the page on screen is already
+  /// scheduled (see [_healCurrentPage]), so build never schedules two.
+  bool _healScheduled = false;
 
   /// Pages the platform could not render (corrupt page, out of memory): shown
   /// with a retry instead of an endless spinner.
@@ -88,6 +119,10 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
 
   @override
   void dispose() {
+    _renderWatchdog?.cancel();
+    _renderWatchdog = null;
+    // Invalidate a reply that is still on its way: the widget is gone.
+    _renderSeq++;
     PdfSpeech.onEvent = null;
     unawaited(PdfSpeech.stop());
     unawaited(BrowserBridge.closePdfText());
@@ -107,37 +142,130 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
       _pager = PdfPager(pageCount: count);
     });
     if (count > 0) {
-      _prefetch(0);
+      _wantPage(0);
       _prefetchText(0);
     }
   }
 
-  /// Renders [index] if it is not cached yet, and remembers it.
-  void _prefetch(int index) {
+  /// Asks for [index] to be rendered: at the front of the queue when [urgent].
+  ///
+  /// Cached, failed, queued and currently-rendering pages are left alone, so
+  /// repeated calls (a rebuild, a page that is already on its way) cost nothing.
+  void _requestRender(int index, {bool urgent = false}) {
     if (index < 0 || index >= _pager.pageCount) return;
-    if (_images.containsKey(index) || !_inFlight.add(index)) return;
+    if (_images.containsKey(index) || _rendering == index) return;
+    _renderQueue.remove(index);
+    if (urgent) {
+      _renderQueue.insert(0, index);
+    } else {
+      _renderQueue.add(index);
+    }
+    _pumpRenders();
+  }
+
+  /// Makes the pages around [index] the ones to render: [index] first, then its
+  /// neighbours. Everything else queued is stale and dropped — that is what
+  /// keeps a fast flip from stacking up a backlog.
+  void _wantPage(int index) {
+    _renderQueue.clear();
+    for (final int page in <int>[index, index + 1, index - 1]) {
+      if (page < 0 || page >= _pager.pageCount) continue;
+      if (_images.containsKey(page) || _failed.contains(page)) continue;
+      if (_rendering == page || _renderQueue.contains(page)) continue;
+      _renderQueue.add(page);
+    }
+    _pumpRenders();
+  }
+
+  /// An explicit 重试 from the user: drop whatever is rendering and ask for
+  /// [index] right away. The abandoned request's reply is ignored by its token,
+  /// so a slow page cannot keep the retried one waiting.
+  void _retryRender(int index) {
+    setState(() => _failed.remove(index));
+    if (_rendering != null) {
+      _renderWatchdog?.cancel();
+      _renderWatchdog = null;
+      _renderSeq++;
+      _rendering = null;
+    }
+    _renderQueue.remove(index);
+    _requestRender(index, urgent: true);
+  }
+
+  /// Starts the next queued render, if the platform is idle.
+  void _pumpRenders() {
+    if (!mounted || _rendering != null) return;
+    while (_renderQueue.isNotEmpty) {
+      final int index = _renderQueue.removeAt(0);
+      if (_images.containsKey(index) || _failed.contains(index)) continue;
+      _startRender(index);
+      return;
+    }
+  }
+
+  /// Renders [index] and stores the result; never leaves the page in limbo.
+  void _startRender(int index) {
+    _rendering = index;
+    final int token = ++_renderSeq;
+    _renderWatchdog?.cancel();
+    _renderWatchdog = Timer(_renderTimeout, () {
+      if (!mounted || token != _renderSeq) return;
+      // The platform never answered: show a retry instead of a spinner that can
+      // never end, and let the next page render.
+      _renderWatchdog = null;
+      _rendering = null;
+      _renderSeq++;
+      setState(() => _failed.add(index));
+      _pumpRenders();
+    });
     unawaited(() async {
+      Uint8List? rendered;
       try {
-        final bytes = await BrowserBridge.renderPdfPage(
+        rendered = await BrowserBridge.renderPdfPage(
           _path,
           index,
           maxWidth: _renderWidth,
         );
-        if (!mounted) return;
-        if (bytes == null || bytes.isEmpty) {
-          setState(() => _failed.add(index));
-          return;
-        }
+      } catch (_) {
+        // A channel-level failure is the same "cannot render" as null.
+        rendered = null;
+      }
+      // A reply that belongs to a request this reader has abandoned (or to a
+      // reader that is gone) must not touch the state.
+      if (!mounted || token != _renderSeq) return;
+      _renderWatchdog?.cancel();
+      _renderWatchdog = null;
+      _rendering = null;
+      final Uint8List? bytes = rendered;
+      if (bytes == null || bytes.isEmpty) {
+        setState(() => _failed.add(index));
+      } else {
         setState(() {
           _failed.remove(index);
           _putImage(index, bytes);
         });
         _prefetchText(index);
         unawaited(_decodeAspect(index, bytes));
-      } finally {
-        _inFlight.remove(index);
       }
+      _pumpRenders();
     }());
+  }
+
+  /// Safety net for a page that is on screen without an image and without a
+  /// pending request (the queue was rebuilt underneath it, a reply was lost):
+  /// ask again after this frame instead of spinning forever. Build must not
+  /// change state, so the request itself is deferred.
+  void _healCurrentPage(int index) {
+    if (index != _pager.index) return;
+    if (_healScheduled) return;
+    if (_images.containsKey(index) || _failed.contains(index)) return;
+    if (_rendering == index || _renderQueue.contains(index)) return;
+    _healScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _healScheduled = false;
+      if (!mounted || _pager.pageCount == 0) return;
+      _wantPage(_pager.index);
+    });
   }
 
   /// Stores a rendered page, dropping the oldest ones beyond [_cacheLimit].
@@ -222,9 +350,9 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
     if (_speakingPage != null && _speakingPage != index) _stopSpeech();
     _pager.goTo(index);
     setState(() {});
-    _prefetch(index);
-    _prefetch(index + 1);
-    _prefetch(index - 1);
+    // The page on screen is what matters now; whatever was queued for pages
+    // already flipped past is dropped inside [_wantPage].
+    _wantPage(index);
     _prefetchText(index);
     _prefetchText(index + 1);
     _prefetchText(index - 1);
@@ -410,12 +538,10 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
             if (_failed.contains(index)) {
               page = _FailedPage(
                 index: index,
-                onRetry: () {
-                  setState(() => _failed.remove(index));
-                  _prefetch(index);
-                },
+                onRetry: () => _retryRender(index),
               );
             } else if (bytes == null) {
+              _healCurrentPage(index);
               page = _Rendering(index: index);
             } else {
               // No InteractiveViewer here: it would compete with the PageView
