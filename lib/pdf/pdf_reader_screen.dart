@@ -604,17 +604,18 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: _chromeVisible ? _appBar(context) : null,
+      // No bottom bar at all: every control sits on the title line, so the
+      // page gets the whole height below the app bar.
       body: SafeArea(child: _body(context)),
-      bottomNavigationBar: _chromeVisible ? _bottomBar(context) : null,
     );
   }
 
-  /// Title, page counter and the whole speech control (speed slider, readout,
-  /// stop) on **one** line.
+  /// Title, page turning, page counter and the whole speech control (speed
+  /// slider, readout, stop) on **one** line.
   ///
-  /// All of it used to live in the bottom bar, which then needed two rows and
-  /// ate into the page. On the title line it costs no height at all, so the
-  /// bottom strip only turns pages and the page gets the rest.
+  /// Everything the reader needs is here, so there is no bottom bar: the page
+  /// keeps the full height below the app bar, and hiding the chrome by tapping
+  /// the middle of the page gives it everything.
   PreferredSizeWidget _appBar(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final TextStyle? metrics = theme.textTheme.titleSmall?.copyWith(
@@ -624,7 +625,23 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
       titleSpacing: 16,
       title: Text(_titleLine, maxLines: 1, overflow: TextOverflow.ellipsis),
       actions: <Widget>[
+        IconButton(
+          key: pdfPreviousButtonKey,
+          tooltip: '上一页',
+          visualDensity: VisualDensity.compact,
+          onPressed:
+              _pager.canGoPrevious ? () => _goTo(_pager.index - 1) : null,
+          icon: const Icon(Icons.chevron_left),
+        ),
         Text(_pager.label, key: pdfPageIndicatorKey, style: metrics),
+        IconButton(
+          key: pdfNextButtonKey,
+          tooltip: '下一页',
+          visualDensity: VisualDensity.compact,
+          onPressed: _pager.canGoNext ? () => _goTo(_pager.index + 1) : null,
+          icon: const Icon(Icons.chevron_right),
+        ),
+        const SizedBox(width: 8),
         const SizedBox(width: 10),
         SizedBox(
           // Wide enough for a finger to hit six speed stops on a tablet.
@@ -796,56 +813,6 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
     );
   }
 
-  /// One compact row: page turning only.
-  ///
-  /// The page counter and every speech control are on the title line (see
-  /// [_appBar]), so this strip is the only height the page loses.
-  Widget _bottomBar(BuildContext context) {
-    return Material(
-      color: Colors.black87,
-      elevation: 8,
-      child: SafeArea(
-        top: false,
-        child: SizedBox(
-          height: 48,
-          child: Row(
-            children: <Widget>[
-              IconButton(
-                key: pdfPreviousButtonKey,
-                tooltip: '上一页',
-                color: Colors.white,
-                onPressed: _pager.canGoPrevious
-                    ? () => _goTo(_pager.index - 1)
-                    : null,
-                icon: const Icon(Icons.chevron_left),
-              ),
-              Expanded(
-                child: Text(
-                  '点文字朗读；左右两侧点击或滑动翻页',
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.55),
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-              IconButton(
-                key: pdfNextButtonKey,
-                tooltip: '下一页',
-                color: Colors.white,
-                onPressed: _pager.canGoNext
-                    ? () => _goTo(_pager.index + 1)
-                    : null,
-                icon: const Icon(Icons.chevron_right),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 /// Placeholder while a page is being rendered.
