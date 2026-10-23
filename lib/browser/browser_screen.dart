@@ -367,7 +367,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
     if (pdfPath != null) {
       unawaited(_ensurePdfPreview(state, resolved.url));
       unawaited(Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => PdfReaderScreen(url: pdfPath),
+        builder: (_) => PdfReaderScreen(url: pdfPath, state: state),
       )));
       return;
     }

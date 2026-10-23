@@ -117,7 +117,13 @@ class _BookmarkPreviewScreenState extends State<BookmarkPreviewScreen> {
       setState(() => _url = target);
       _syncAddress();
       unawaited(Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => PdfReaderScreen(url: pdfPath, title: _title),
+        // The reader logs its rendering into the app's diagnostics; the preview
+        // is opened from settings, which sits inside the [AppScope].
+        builder: (_) => PdfReaderScreen(
+          url: pdfPath,
+          title: _title,
+          state: AppScope.read(context),
+        ),
       )));
       return;
     }

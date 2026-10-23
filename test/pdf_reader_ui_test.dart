@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tablet_browser/pdf/pdf_document.dart';
 import 'package:tablet_browser/pdf/pdf_reader_screen.dart';
+import 'package:tablet_browser/state/app_state.dart';
 
 /// The PDF reader: one page at a time, turned by tapping the outer thirds or by
 /// swiping.
@@ -397,6 +399,58 @@ void main() {
 
     expect(find.text('第 1 页渲染失败'), findsNothing);
     expect(find.byType(Image), findsWidgets);
+  });
+
+  testWidgets('渲染过程写进诊断日志，可从导出日志定位问题', (tester) async {
+    final Directory directory = Directory.systemTemp.createTempSync('tb_pdf_log');
+    addTearDown(() {
+      if (directory.existsSync()) directory.deleteSync(recursive: true);
+    });
+    final AppState state = AppState(
+      store: ConfigStore(directory),
+      settings: AppSettings(
+        localServerEnabled: false,
+        localServerRoot: directory.path,
+        parentalGateEnabled: false,
+      ),
+    );
+
+    tester.view.physicalSize = const Size(1200, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+      home: PdfReaderScreen(url: 'file:///sdcard/ebooks/说明.pdf', state: state),
+    ));
+    for (var i = 0; i < 12; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump(const Duration(milliseconds: 40));
+    }
+
+    // 翻一页：日志里要有翻页、请求、完成这些可对照的记录。
+    final Rect page = tester.getRect(find.byType(PageView));
+    await tester.tapAt(Offset(page.right - 20, page.center.dy));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    String logText() => state.appLog
+        .where((AppLogEntry entry) => entry.tag == 'pdf')
+        .map((AppLogEntry entry) => entry.message)
+        .join('\n');
+
+    final String log = logText();
+    expect(log, contains('打开「/sdcard/ebooks/说明.pdf」'));
+    expect(log, contains('3 页'));
+    expect(log, contains('渲染 #'));
+    expect(log, contains('完成'));
+    expect(log, contains('翻页 1 → 2（向右）'));
+    expect(log, contains('在渲染='));
+
+    // Let the reader go away and flush the log notification timer it schedules.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(logText(), contains('关闭阅读器'));
   });
 
   testWidgets('a PDF bookmark preview is its first rendered page', (tester) async {

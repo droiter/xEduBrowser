@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../browser/browser_bridge.dart';
+import '../state/app_state.dart';
 import 'pdf_document.dart';
 import 'pdf_speech.dart';
 
@@ -28,13 +29,26 @@ const Key pdfSpeechHighlightKey = ValueKey<String>('pdf-speech-highlight');
 /// Rendering happens off the platform thread; a page that fails to render shows
 /// a message instead of an empty area, and nothing here writes to the document.
 class PdfReaderScreen extends StatefulWidget {
-  const PdfReaderScreen({super.key, required this.url, this.title = ''});
+  const PdfReaderScreen({
+    super.key,
+    required this.url,
+    this.title = '',
+    this.state,
+  });
 
   /// The bookmark address (`file://…/x.pdf` or a plain path).
   final String url;
 
   /// Bookmark title, shown when it is not empty.
   final String title;
+
+  /// App state, used **only** to write the reader's diagnostics into the app log.
+  ///
+  /// Optional: the screen must render without an [AppScope] (widget tests,
+  /// previews), and a null here simply means "do not log". The lines are what a
+  /// bug report can be diagnosed from — which page was requested, how long the
+  /// platform took, whether a reply ever arrived, cache hits and evictions.
+  final AppState? state;
 
   @override
   State<PdfReaderScreen> createState() => _PdfReaderScreenState();
@@ -127,6 +141,8 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
 
   @override
   void dispose() {
+    _log('关闭阅读器「$_logName」：共 ${_pager.pageCount} 页，'
+        '缓存 ${_images.length} 页，失败 ${_failed.length} 页');
     _renderWatchdog?.cancel();
     _renderWatchdog = null;
     // Invalidate a reply that is still on its way: the widget is gone.
@@ -138,9 +154,25 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
     super.dispose();
   }
 
+  /// Writes one diagnostic line under the `pdf` tag; silently does nothing when
+  /// the screen was created without an [AppState] (tests, previews).
+  void _log(String message, {LogLevel level = LogLevel.info}) {
+    widget.state?.logEvent('pdf', message, level: level);
+  }
+
+  /// The document's file name, for log lines (the full path is logged once).
+  String get _logName {
+    final int slash = _path.lastIndexOf('/');
+    return slash < 0 ? _path : _path.substring(slash + 1);
+  }
+
   Future<void> _loadDocument() async {
+    final Stopwatch watch = Stopwatch()..start();
     final count = await BrowserBridge.pdfPageCount(_path);
+    watch.stop();
     if (!mounted) return;
+    _log('打开「$_path」：$count 页，读页数 ${watch.elapsedMilliseconds}ms',
+        level: count <= 0 ? LogLevel.warn : LogLevel.info);
     setState(() {
       _loadingDocument = false;
       if (count <= 0) {
@@ -190,6 +222,12 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
   /// [index] right away. The abandoned request's reply is ignored by its token,
   /// so a slow page cannot keep the retried one waiting.
   void _retryRender(int index) {
+    final int? running = _rendering;
+    _log(
+      '重试 第 ${index + 1} 页'
+      '${running == null ? '' : '（放弃在渲染的第 ${running + 1} 页）'}',
+      level: LogLevel.warn,
+    );
     setState(() => _failed.remove(index));
     if (_rendering != null) {
       _renderWatchdog?.cancel();
@@ -216,11 +254,20 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
   void _startRender(int index) {
     _rendering = index;
     final int token = ++_renderSeq;
+    final Stopwatch watch = Stopwatch()..start();
+    _log('渲染 #$token 第 ${index + 1} 页 开始（排队 ${_renderQueue.length}）',
+        level: LogLevel.debug);
     _renderWatchdog?.cancel();
     _renderWatchdog = Timer(_renderTimeout, () {
       if (!mounted || token != _renderSeq) return;
+      watch.stop();
       // The platform never answered: show a retry instead of a spinner that can
       // never end, and let the next page render.
+      _log(
+        '渲染 #$token 第 ${index + 1} 页 超时：${_renderTimeout.inSeconds}s 无回音，已放弃'
+        '（队列 ${_renderQueue.length}）',
+        level: LogLevel.warn,
+      );
       _renderWatchdog = null;
       _rendering = null;
       _renderSeq++;
@@ -239,16 +286,34 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
         // A channel-level failure is the same "cannot render" as null.
         rendered = null;
       }
-      // A reply that belongs to a request this reader has abandoned (or to a
-      // reader that is gone) must not touch the state.
-      if (!mounted || token != _renderSeq) return;
+      watch.stop();
+      if (!mounted) return;
+      // A reply that belongs to a request this reader has abandoned must not
+      // touch the state; it is still worth a line, because a late reply means
+      // the platform took longer than this reader was willing to wait.
+      if (token != _renderSeq) {
+        _log(
+          '渲染 #$token 第 ${index + 1} 页 的回音已过期（${watch.elapsedMilliseconds}ms），忽略',
+          level: LogLevel.warn,
+        );
+        return;
+      }
       _renderWatchdog?.cancel();
       _renderWatchdog = null;
       _rendering = null;
       final Uint8List? bytes = rendered;
       if (bytes == null || bytes.isEmpty) {
+        _log(
+          '渲染 #$token 第 ${index + 1} 页 失败：平台返回空（${watch.elapsedMilliseconds}ms）',
+          level: LogLevel.warn,
+        );
         setState(() => _failed.add(index));
       } else {
+        _log(
+          '渲染 #$token 第 ${index + 1} 页 完成 ${bytes.length ~/ 1024}KB'
+          '（${watch.elapsedMilliseconds}ms）',
+          level: LogLevel.debug,
+        );
         setState(() {
           _failed.remove(index);
           _putImage(index, bytes);
@@ -270,6 +335,11 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
     if (_images.containsKey(index) || _failed.contains(index)) return;
     if (_rendering == index || _renderQueue.contains(index)) return;
     _healScheduled = true;
+    _log(
+      '第 ${index + 1} 页既没有图也没有在途请求，下一帧自动重新请求'
+      '（缓存 ${_images.length} 页）',
+      level: LogLevel.warn,
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _healScheduled = false;
       if (!mounted || _pager.pageCount == 0) return;
@@ -291,7 +361,13 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
     while (_cacheOrder.length > _cacheLimit) {
       final int position = _evictionCandidate();
       if (position < 0) break;
-      _images.remove(_cacheOrder.removeAt(position));
+      final int dropped = _cacheOrder.removeAt(position);
+      _images.remove(dropped);
+      _log(
+        '缓存淘汰第 ${dropped + 1} 页（当前第 ${_pager.index + 1} 页，'
+        '缓存 ${_images.length}/$_cacheLimit 页）',
+        level: LogLevel.debug,
+      );
     }
   }
 
@@ -381,8 +457,16 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
     // Which way the reader is moving decides which neighbour is worth rendering
     // first: flipping back through an ebook must not spend the one render on
     // the page they have just left.
-    final int direction = index >= _lastSeenPage ? 1 : -1;
+    final int previous = _lastSeenPage;
+    final int direction = index >= previous ? 1 : -1;
     _lastSeenPage = index;
+    final int? running = _rendering;
+    _log(
+      '翻页 ${previous + 1} → ${index + 1}（${direction > 0 ? '向右' : '向左'}），'
+      '命中缓存=${_images.containsKey(index) ? '是' : '否'}，'
+      '缓存 ${_images.length}/$_cacheLimit 页，'
+      '在渲染=${running == null ? '无' : '第 ${running + 1} 页'}',
+    );
     setState(() {});
     // The page on screen is what matters now; whatever was queued for pages
     // already flipped past is dropped inside [_wantPage].
