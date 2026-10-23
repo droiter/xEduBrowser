@@ -51,30 +51,50 @@ enum LocalPageTitleSource {
   final String labelZh;
 }
 
-/// One HTML page found by the scan.
+/// Which reader opens a file the scan found.
+///
+/// The two kinds are imported by the same dialog but are not titled the same
+/// way: an HTML page has a `<title>` and sits in a meaningful folder, while a
+/// PDF has neither — its own file name is the only name it can be given.
+enum ImportCandidateKind { page, pdf }
+
+/// One file found by the scan: an HTML page, or a PDF.
 class ImportCandidate {
   final String filePath;
   final String url;
 
-  /// Every name this page could be titled with: the import dialog's 标题来源
+  /// Every name this file could be titled with: the import dialog's 标题来源
   /// dropdown picks one of them, and the preview re-renders without rescanning.
+  /// A PDF only ever has a file name worth offering.
   final LocalPageTitles titles;
 
-  /// The first-level subdirectory this page came from.
+  /// The first-level subdirectory this file came from; empty for a file sitting
+  /// directly in the chosen directory.
   final String subdirectory;
+
+  /// Whether this is an HTML page or a PDF.
+  final ImportCandidateKind kind;
 
   const ImportCandidate({
     required this.filePath,
     required this.url,
     required this.titles,
     required this.subdirectory,
+    this.kind = ImportCandidateKind.page,
   });
 
-  /// The name this page gets when the chosen 标题来源 is [source].
-  String titleFor(LocalPageTitleSource source) => titles.importTitle(source);
+  bool get isPdf => kind == ImportCandidateKind.pdf;
+
+  /// The name this file gets when the chosen 标题来源 is [source].
+  ///
+  /// A PDF ignores the choice: it has no internal title, and 所在目录名 or 留空
+  /// would name it after something that is not the document, so it always keeps
+  /// its own file name (without the `.pdf`).
+  String titleFor(LocalPageTitleSource source) =>
+      isPdf ? titles.fileName.trim() : titles.importTitle(source);
 
   /// The default name — the page's `<title>`, or its file name — which is what
-  /// the importer produced before the choice existed.
+  /// the importer produced before the choice existed. For a PDF, the file name.
   String get title => titleFor(LocalPageTitleSource.internalTitle);
 }
 
@@ -143,6 +163,8 @@ class BookmarkImportPlan {
   /// First-level subdirectories that were walked, by name.
   final List<String> subdirectories;
 
+  /// Every file that would become a bookmark, in scan order: the chosen
+  /// directory's own HTML pages, then its PDFs, then the subdirectories' pages.
   final List<ImportCandidate> candidates;
 
   /// The scan stopped at the file cap; the remainder was not read.
@@ -153,15 +175,34 @@ class BookmarkImportPlan {
   /// its subfolders, and skipping those surprised people.
   final int rootLevelHtmlCount;
 
+  /// PDF files sitting directly in the chosen directory. PDFs are only taken
+  /// from there, never from the subdirectories.
+  final int rootLevelPdfCount;
+
   const BookmarkImportPlan({
     required this.rootPath,
     this.subdirectories = const [],
     this.candidates = const [],
     this.truncated = false,
     this.rootLevelHtmlCount = 0,
+    this.rootLevelPdfCount = 0,
   });
 
   int get fileCount => candidates.length;
+
+  /// How many of [candidates] are HTML pages.
+  int get pageCount => _count(pdf: false);
+
+  /// How many of [candidates] are PDFs.
+  int get pdfCount => _count(pdf: true);
+
+  int _count({required bool pdf}) {
+    var total = 0;
+    for (final candidate in candidates) {
+      if (candidate.isPdf == pdf) total++;
+    }
+    return total;
+  }
 
   bool get isEmpty => candidates.isEmpty;
 }
@@ -173,6 +214,12 @@ class BookmarkImportPlan {
 abstract final class BookmarkImporter {
   /// Extensions treated as importable pages.
   static const Set<String> pageExtensions = {'html', 'htm', 'xhtml'};
+
+  /// Extensions treated as importable documents.
+  ///
+  /// A PDF is not a page: it is read page by page by the built-in reader, so it
+  /// is found and named differently (see [scan]).
+  static const Set<String> pdfExtensions = {'pdf'};
 
   /// Default cap, so pointing at a huge tree cannot freeze the app.
   ///
@@ -195,9 +242,19 @@ abstract final class BookmarkImporter {
 
   /// Scans [rootPath].
   ///
-  /// Collects the HTML pages of the chosen directory itself **and** of its
-  /// first-level subdirectories (each walked recursively, so a nested
-  /// static-site export still imports). Hidden directories are skipped.
+  /// Collects two kinds of file, with different rules:
+  ///
+  /// * **HTML pages** — those of the chosen directory itself **and** those of
+  ///   its first-level subdirectories (each walked recursively, so a nested
+  ///   static-site export still imports). Hidden directories are skipped.
+  /// * **PDFs** — only those sitting directly in the chosen directory. A
+  ///   courseware folder keeps its ebooks beside its pages, but walking into
+  ///   the subdirectories would sweep up a whole archive of documents the user
+  ///   did not point at, and a PDF needs nothing but itself to open.
+  ///
+  /// Each PDF becomes a candidate named after its file name; see
+  /// [ImportCandidate.titleFor]. A candidate that would only be reached past
+  /// [maxFiles] is never read.
   static Future<BookmarkImportPlan> scan(
     String rootPath, {
     String? localServerBase,
@@ -222,20 +279,37 @@ abstract final class BookmarkImporter {
     ]..sort();
 
     // Pages sitting directly in the chosen directory, in name order.
-    final rootFiles = <File>[
+    final rootPages = <File>[
       for (final entity in rootEntries)
         if (entity is File && _isPage(entity.path)) entity,
-    ]..sort((a, b) => a.path.toLowerCase().compareTo(b.path.toLowerCase()));
-    final rootLevelHtml = rootFiles.length;
+    ]..sort(_byPathName);
+    // The PDFs beside them, also in name order. They come after the pages so a
+    // directory that holds both keeps the order it always had.
+    final rootPdfs = <File>[
+      for (final entity in rootEntries)
+        if (entity is File && _isPdf(entity.path)) entity,
+    ]..sort(_byPathName);
+    final rootLevelHtml = rootPages.length;
+    final rootLevelPdf = rootPdfs.length;
 
-    // Only the pages that fit under the cap are read at all: reading `<title>`
+    // Only the files that fit under the cap are read at all: a page's `<title>`
     // is a synchronous disk read, so files past the cap must not be touched.
     final candidates = await _candidatesFor(
-      rootFiles.take(maxFiles),
+      rootPages.take(maxFiles),
       subdirectory: '',
       localServerBase: localServerBase,
       localServerRoot: localServerRoot,
     );
+    final pdfSlots = maxFiles - candidates.length;
+    if (pdfSlots > 0) {
+      candidates.addAll(await _candidatesFor(
+        rootPdfs.take(pdfSlots),
+        kind: ImportCandidateKind.pdf,
+        subdirectory: '',
+        localServerBase: localServerBase,
+        localServerRoot: localServerRoot,
+      ));
+    }
     var truncated = candidates.length >= maxFiles;
 
     for (final name in subdirectoryNames) {
@@ -262,6 +336,7 @@ abstract final class BookmarkImporter {
       candidates: candidates,
       truncated: truncated,
       rootLevelHtmlCount: rootLevelHtml,
+      rootLevelPdfCount: rootLevelPdf,
     );
   }
 
@@ -323,14 +398,19 @@ abstract final class BookmarkImporter {
     required String subdirectory,
     required String? localServerBase,
     required String? localServerRoot,
+    ImportCandidateKind kind = ImportCandidateKind.page,
   }) async {
     final out = <ImportCandidate>[];
     for (final file in files) {
       out.add(ImportCandidate(
         filePath: file.path,
         url: _urlFor(file.path, localServerBase, localServerRoot),
-        titles: LocalPageTitles.forPath(file.path),
+        // A PDF has no `<title>` to read — only its file name names it.
+        titles: kind == ImportCandidateKind.pdf
+            ? LocalPageTitles.forPdf(file.path)
+            : LocalPageTitles.forPath(file.path),
         subdirectory: subdirectory,
+        kind: kind,
       ));
       if (out.length % _yieldEvery == 0) {
         await Future<void>.delayed(Duration.zero);
@@ -409,6 +489,18 @@ abstract final class BookmarkImporter {
     return pageExtensions.contains(name.substring(dot + 1));
   }
 
+  /// Whether [path] is a PDF the reader can open.
+  static bool _isPdf(String path) {
+    final name = _baseName(path).toLowerCase();
+    final dot = name.lastIndexOf('.');
+    if (dot < 0) return false;
+    return pdfExtensions.contains(name.substring(dot + 1));
+  }
+
+  /// Name order, case-insensitively, for both files and directories.
+  static int _byPathName(FileSystemEntity a, FileSystemEntity b) =>
+      a.path.toLowerCase().compareTo(b.path.toLowerCase());
+
   static bool _isHidden(String path) => _baseName(path).startsWith('.');
 
   static String _baseName(String path) =>
@@ -482,13 +574,32 @@ class LocalPageTitles {
   /// synchronous read, exactly like the directory scan does.
   static LocalPageTitles forPath(String filePath) {
     final name = _pathBaseName(filePath);
-    final dot = name.lastIndexOf('.');
     return LocalPageTitles(
-      fileName: dot > 0 ? name.substring(0, dot) : name,
+      fileName: _fileStem(name),
       directoryName: _pathParentName(filePath),
       internalTitle: BookmarkImporter.readHtmlTitle(filePath),
     );
   }
+
+  /// Candidates for a PDF.
+  ///
+  /// A PDF carries no readable `<title>` in its first bytes and its folder says
+  /// nothing about the document, so the file name is the only name offered.
+  /// Nothing is read from disk.
+  static LocalPageTitles forPdf(String filePath) => LocalPageTitles(
+        fileName: _fileStem(_pathBaseName(filePath)),
+        directoryName: _pathParentName(filePath),
+        internalTitle: null,
+      );
+}
+
+/// [name] without its final extension (`第 1 课.pdf` → `第 1 课`).
+///
+/// A leading dot is part of a dotfile's name, not an extension, so `.hidden`
+/// keeps its whole name.
+String _fileStem(String name) {
+  final dot = name.lastIndexOf('.');
+  return dot > 0 ? name.substring(0, dot) : name;
 }
 
 String _pathBaseName(String path) {
@@ -508,7 +619,10 @@ String _pathParentName(String path) {
 class BookmarkImportOutcome {
   final int added;
 
-  /// Pages left out because their address is already bookmarked.
+  /// How many of [added] came from a PDF rather than an HTML page.
+  final int addedPdfCount;
+
+  /// Files left out because their address is already bookmarked.
   final int skipped;
 
   final int subdirectoryCount;
@@ -517,7 +631,7 @@ class BookmarkImportOutcome {
   final bool truncated;
   final String targetCategoryId;
 
-  /// Pages left out because their name was already taken, in scan order.
+  /// Files left out because their name was already taken, in scan order.
   final List<ImportNameConflict> nameConflicts;
 
   const BookmarkImportOutcome({
@@ -528,14 +642,23 @@ class BookmarkImportOutcome {
     required this.whitelistPattern,
     required this.truncated,
     required this.targetCategoryId,
+    this.addedPdfCount = 0,
     this.nameConflicts = const [],
   });
 
   int get nameConflictCount => nameConflicts.length;
 
+  /// How many of [added] are HTML pages.
+  int get addedPageCount => added - addedPdfCount;
+
   /// One-line summary for a snackbar.
   String get summary {
     final buffer = StringBuffer('已导入 $added 个书签');
+    if (added > 0 && addedPdfCount > 0 && addedPageCount > 0) {
+      buffer.write('（HTML $addedPageCount 个、PDF $addedPdfCount 个）');
+    } else if (added > 0 && addedPdfCount > 0) {
+      buffer.write('（PDF）');
+    }
     if (skipped > 0) buffer.write('，跳过 $skipped 个（已存在）');
     if (nameConflicts.isNotEmpty) {
       buffer.write('，跳过 $nameConflictCount 个（重名）');

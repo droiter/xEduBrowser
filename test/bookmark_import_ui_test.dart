@@ -236,6 +236,73 @@ void main() {
     expect(find.text('白名单：file:///sdcard/course/'), findsOneWidget);
   });
 
+  testWidgets('a directory of PDFs imports them named after the file',
+      (tester) async {
+    final books = Directory('${root.path}/电子书')..createSync();
+    File('${books.path}/拼音练习.pdf').writeAsStringSync('%PDF-1.4 fake');
+    File('${books.path}/汉字练习.pdf').writeAsStringSync('%PDF-1.4 fake');
+
+    await pumpHost(tester, directory: books.path);
+    await tester.tap(find.text('打开导入'));
+    await tester.pump();
+    await letScanFinish(tester);
+
+    // No 标题来源 dropdown for a batch that is all PDFs: there is nothing to
+    // choose, the file name is the only name.
+    expect(find.byKey(importTitleSourceKey), findsNothing);
+    expect(find.textContaining('找到 0 个 HTML 页面'), findsOneWidget);
+    expect(find.textContaining('找到 2 个 PDF 文件'), findsOneWidget);
+    // The names the import will write, and the PDF tag on each row.
+    expect(find.text('拼音练习'), findsOneWidget);
+    expect(find.text('汉字练习'), findsOneWidget);
+    expect(find.text('PDF'), findsNWidgets(2));
+    // A PDF needs nothing but itself, so the dialog points out that the default
+    // whole-folder rule can be narrowed to one rule per file.
+    expect(find.textContaining('PDF 只需要文件本身'), findsOneWidget);
+    expect(state.bookmarks, isEmpty);
+
+    await tester.tap(find.text('开始导入'));
+    await letScanFinish(tester);
+
+    expect(state.bookmarks.length, 2);
+    expect(
+      state.bookmarks.map((b) => b.title).toSet(),
+      {'拼音练习', '汉字练习'},
+    );
+    expect(state.bookmarks.every((b) => b.url.endsWith('.pdf')), isTrue);
+  });
+
+  testWidgets('mixed HTML and PDF: pages follow 标题来源, PDFs keep the file name',
+      (tester) async {
+    File('${root.path}/参考.pdf').writeAsStringSync('%PDF-1.4 fake');
+
+    await pumpHost(tester);
+    await tester.tap(find.text('打开导入'));
+    await tester.pump();
+    await letScanFinish(tester);
+
+    expect(find.textContaining('找到 3 个 HTML 页面'), findsOneWidget);
+    expect(find.textContaining('找到 1 个 PDF 文件'), findsOneWidget);
+    // The PDF is previewed with its file name even though the batch starts on
+    // 网页内部标题, and the hint says so.
+    expect(find.text('参考'), findsOneWidget);
+    expect(find.textContaining('同一批里的 PDF 不受这里影响'), findsOneWidget);
+    expect(find.text('PDF'), findsOneWidget);
+
+    await tester.tap(find.text('开始导入'));
+    await letScanFinish(tester);
+
+    expect(state.bookmarks.length, 4);
+    expect(
+      state.bookmarks.map((b) => b.title).toSet(),
+      {'第一课 拼音', '第二课 汉字', '数学第一课', '参考'},
+    );
+    expect(
+      state.bookmarks.singleWhere((b) => b.url.endsWith('.pdf')).title,
+      '参考',
+    );
+  });
+
   testWidgets('a directory with nothing to import says so', (tester) async {
     final flat = Directory('${root.path}/空目录')..createSync();
 

@@ -26,6 +26,14 @@ const Key selectAllBookmarksKey = ValueKey<String>('settings-bookmarks-select-al
 const Key moveSelectedBookmarksKey = ValueKey<String>('settings-bookmarks-move');
 const Key deleteSelectedBookmarksKey = ValueKey<String>('settings-bookmarks-delete');
 
+/// Test hook for one category's header in the grouped bookmark list.
+Key bookmarkGroupKey(String categoryId) =>
+    ValueKey<String>('bookmark-group-$categoryId');
+
+/// Test hook for the 展开 / 收起 button at the end of one category group.
+Key bookmarkGroupExpandKey(String categoryId) =>
+    ValueKey<String>('bookmark-group-expand-$categoryId');
+
 /// The 书签 card of the settings screen: add a bookmark, import a directory of
 /// local pages, manage categories, and edit/delete/move the bookmarks that
 /// exist — one at a time or as a multi-selection.
@@ -33,6 +41,11 @@ const Key deleteSelectedBookmarksKey = ValueKey<String>('settings-bookmarks-dele
 /// The home page shows bookmarks only, so every management action lives here.
 /// Adding a bookmark grants the address **and** the site (or local folder) that
 /// contains it — see [AppState.addBookmark].
+///
+/// The list is **grouped by category**, each group headed by its name and count,
+/// and a group shows its first [visibleRowsPerCategory] rows only: the rest wait
+/// behind a 展开 button. Without the fold a single imported courseware category
+/// would push every other category off the screen.
 /// 「一键补全预览图」按钮。
 const Key generateThumbnailsButtonKey = ValueKey<String>('bookmark-generate-thumbnails');
 
@@ -47,6 +60,13 @@ class BookmarkManagerCard extends StatefulWidget {
 }
 
 class _BookmarkManagerCardState extends State<BookmarkManagerCard> {
+  /// How many rows of a category the list shows before folding the rest behind
+  /// its 展开 button.
+  ///
+  /// Ten rows fill most of a tablet screen: enough that a normal category needs
+  /// no extra tap, few enough that the next category is still in sight.
+  static const int visibleRowsPerCategory = 10;
+
   /// Whether the list is in multi-select mode.
   ///
   /// Off by default: a plain tap keeps renaming a bookmark, so bulk actions are
@@ -55,6 +75,19 @@ class _BookmarkManagerCardState extends State<BookmarkManagerCard> {
 
   /// Ids of the ticked bookmarks; only meaningful while [_selecting].
   final Set<String> _selected = <String>{};
+
+  /// Category ids whose group the parent expanded past
+  /// [visibleRowsPerCategory].
+  ///
+  /// View state only, like the home wall's expansion: a fresh visit starts with
+  /// every category folded back to its first ten rows.
+  final Set<String> _expandedGroups = <String>{};
+
+  void _toggleGroupExpanded(String categoryId) {
+    setState(() {
+      if (!_expandedGroups.remove(categoryId)) _expandedGroups.add(categoryId);
+    });
+  }
 
   void _setSelecting(bool value) {
     setState(() {
@@ -219,17 +252,66 @@ class _BookmarkManagerCardState extends State<BookmarkManagerCard> {
             style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
           )
         else
-          for (final bookmark in bookmarks)
-            _BookmarkRow(
-              key: ValueKey<String>('bookmark-row-${bookmark.id}'),
-              state: state,
-              bookmark: bookmark,
-              selecting: _selecting,
-              selected: selected.contains(bookmark.id),
-              onToggleSelected: () => _toggleSelected(bookmark.id),
-            ),
+          ..._groupedRows(context, state, selected),
       ],
     );
+  }
+
+  /// The bookmarks, one block per category, in category order (未分类 last —
+  /// [AppState.populatedCategoryIds]).
+  ///
+  /// A block shows its first [visibleRowsPerCategory] rows and folds the rest
+  /// behind a 展开 button. Only categories that actually hold a bookmark get a
+  /// block: an empty category is noise in a list whose job is editing.
+  List<Widget> _groupedRows(
+    BuildContext context,
+    AppState state,
+    Set<String> selected,
+  ) {
+    final rows = <Widget>[];
+    for (final categoryId in state.populatedCategoryIds) {
+      final inCategory = state.bookmarksIn(categoryId);
+      if (inCategory.isEmpty) continue;
+
+      final bool overflows = inCategory.length > visibleRowsPerCategory;
+      final bool expanded = _expandedGroups.contains(categoryId);
+      final visible = overflows && !expanded
+          ? inCategory.sublist(0, visibleRowsPerCategory)
+          : inCategory;
+      final int folded = inCategory.length - visible.length;
+
+      rows.add(_GroupHeader(
+        key: bookmarkGroupKey(categoryId),
+        label: state.categoryLabel(categoryId),
+        count: inCategory.length,
+        uncategorized: categoryId == uncategorizedId,
+        first: rows.isEmpty,
+      ));
+      for (final bookmark in visible) {
+        rows.add(_BookmarkRow(
+          key: ValueKey<String>('bookmark-row-${bookmark.id}'),
+          state: state,
+          bookmark: bookmark,
+          selecting: _selecting,
+          selected: selected.contains(bookmark.id),
+          onToggleSelected: () => _toggleSelected(bookmark.id),
+        ));
+      }
+      if (overflows) {
+        rows.add(Padding(
+          padding: const EdgeInsets.only(top: 2, bottom: 4),
+          child: Center(
+            child: TextButton.icon(
+              key: bookmarkGroupExpandKey(categoryId),
+              onPressed: () => _toggleGroupExpanded(categoryId),
+              icon: Icon(expanded ? Icons.expand_less : Icons.expand_more),
+              label: Text(expanded ? '收起' : '展开（还有 $folded 个）'),
+            ),
+          ),
+        ));
+      }
+    }
+    return rows;
   }
 
   /// Asks for an address (typed or picked from the local file browser), then
@@ -328,7 +410,7 @@ class _BookmarkManagerCardState extends State<BookmarkManagerCard> {
   }
 
   /// Picks a directory and imports every HTML page found in it and in its
-  /// first-level subdirectories.
+  /// first-level subdirectories, plus the PDFs sitting directly in it.
   Future<void> _importFromDirectory(BuildContext context) async {
     final picked = await Navigator.of(context).push<String>(
       MaterialPageRoute<String>(builder: (_) => const LocalFilesScreen(pickDirectory: true)),
@@ -357,6 +439,60 @@ class _BookmarkManagerCardState extends State<BookmarkManagerCard> {
       buffer.write('；白名单：${outcome.whitelistPattern}');
     }
     showAppSnackBar(context, buffer.toString());
+  }
+}
+
+/// The header of one category block in the manager's list: its name and how many
+/// bookmarks it holds, so the count is visible even while the group is folded.
+class _GroupHeader extends StatelessWidget {
+  const _GroupHeader({
+    super.key,
+    required this.label,
+    required this.count,
+    required this.uncategorized,
+    this.first = false,
+  });
+
+  final String label;
+  final int count;
+
+  /// 未分类 is not a real category: it gets an inbox rather than a folder.
+  final bool uncategorized;
+
+  /// The top group: less empty space above it, right under the toolbar buttons.
+  final bool first;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: EdgeInsets.only(top: first ? 6 : 16, bottom: 2),
+      child: Row(
+        children: <Widget>[
+          Icon(
+            uncategorized ? Icons.inbox_outlined : Icons.folder_open_outlined,
+            size: 18,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '$count 个',
+            style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
+          ),
+        ],
+      ),
+    );
   }
 }
 

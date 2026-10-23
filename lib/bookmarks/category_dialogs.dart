@@ -518,8 +518,9 @@ class _TargetCategoryDialogState extends State<_TargetCategoryDialog> {
 /// How many scanned pages the preview lists before it collapses into "还有 K 个…".
 const int _previewLimit = 10;
 
-/// The directory-import dialog: scan, preview, choose the 标题来源 for the whole
-/// batch, choose the target category, import.
+/// The directory-import dialog: scan, preview, choose the 标题来源 for the HTML
+/// pages of the batch (PDFs are always named after their file), choose the
+/// target category, import.
 class _BookmarkImportDialog extends StatefulWidget {
   const _BookmarkImportDialog({required this.directoryPath});
 
@@ -665,7 +666,7 @@ class _BookmarkImportDialogState extends State<_BookmarkImportDialog> {
                     icon: Icons.warning_amber_outlined,
                     color: Theme.of(context).colorScheme.error,
                     text: '已达到 ${BookmarkImporter.defaultMaxFiles} 个文件的上限，'
-                        '超出的页面这次不会被导入。',
+                        '超出的文件这次不会被导入。',
                   ),
                 const Divider(height: 28),
                 _categoryField(context, state),
@@ -747,7 +748,15 @@ class _BookmarkImportDialogState extends State<_BookmarkImportDialog> {
             ),
           ),
         const SizedBox(height: 4),
-        _fact(context, Icons.description_outlined, '找到 ${plan.fileCount} 个 HTML 页面'),
+        _fact(context, Icons.description_outlined, '找到 ${plan.pageCount} 个 HTML 页面'),
+        if (plan.pdfCount > 0) ...[
+          const SizedBox(height: 4),
+          _fact(
+            context,
+            Icons.picture_as_pdf_outlined,
+            '找到 ${plan.pdfCount} 个 PDF 文件（按文件名命名）',
+          ),
+        ],
       ],
     );
   }
@@ -766,11 +775,34 @@ class _BookmarkImportDialogState extends State<_BookmarkImportDialog> {
   /// The 标题来源 dropdown: the same four sources as the add-bookmark dialog,
   /// applied to every page of the batch. Changing it re-renders the preview
   /// from the names the scan already collected, so no rescan is needed.
+  ///
+  /// Only HTML pages are affected: a PDF always keeps its file name, so a batch
+  /// that holds nothing but PDFs has no source to choose and shows a note in
+  /// place of the dropdown.
   Widget _titleSourceField(BuildContext context, BookmarkImportPlan plan) {
     final theme = Theme.of(context);
-    final missing = plan.candidates
-        .where((candidate) => !candidate.titles.hasInternalTitle)
-        .length;
+    if (plan.pageCount == 0) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(
+              Icons.picture_as_pdf_outlined,
+              size: 17,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              '这批都是 PDF：书签名一律取文件名（去掉 .pdf），没有可选项。',
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+            ),
+          ),
+        ],
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -798,7 +830,7 @@ class _BookmarkImportDialogState extends State<_BookmarkImportDialog> {
         ),
         const SizedBox(height: 6),
         Text(
-          _titleSourceHint(missing),
+          _titleSourceHint(plan),
           style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
         ),
       ],
@@ -806,19 +838,29 @@ class _BookmarkImportDialogState extends State<_BookmarkImportDialog> {
   }
 
   /// One line saying what the chosen source will produce for this batch.
-  String _titleSourceHint(int missingInternalTitles) {
+  String _titleSourceHint(BookmarkImportPlan plan) {
+    final missingInternalTitles = plan.candidates
+        .where((candidate) => !candidate.isPdf && !candidate.titles.hasInternalTitle)
+        .length;
+    final pdfNote = plan.pdfCount == 0
+        ? ''
+        : plan.pdfCount == 1
+            ? ' 同一批里的 PDF 不受这里影响，一律按文件名命名。'
+            : ' 同一批里的 ${plan.pdfCount} 个 PDF 不受这里影响，一律按文件名命名。';
+    final String base;
     switch (_titleSource) {
       case LocalPageTitleSource.internalTitle:
-        return missingInternalTitles == 0
+        base = missingInternalTitles == 0
             ? '这些页面都有网页内部标题，全部按它命名。'
             : '其中 $missingInternalTitles 个页面没有内部标题，这些会用文件名。';
       case LocalPageTitleSource.fileName:
-        return '按 HTML 文件名（去掉扩展名）命名。';
+        base = '按 HTML 文件名（去掉扩展名）命名。';
       case LocalPageTitleSource.directoryName:
-        return '按每个页面所在目录名命名；个别页面取不到目录名时会用文件名。';
+        base = '按每个页面所在目录名命名；个别页面取不到目录名时会用文件名。';
       case LocalPageTitleSource.blank:
-        return '书签名留空：方块下方显示网址或域名，之后可以逐个改标题。';
+        base = '书签名留空：方块下方显示网址或域名，之后可以逐个改标题。';
     }
+    return '$base$pdfNote';
   }
 
   Widget _emptyState(BuildContext context, BookmarkImportPlan plan) {
@@ -830,18 +872,21 @@ class _BookmarkImportDialogState extends State<_BookmarkImportDialog> {
           context,
           icon: Icons.search_off_outlined,
           color: theme.colorScheme.outline,
-          text: '没有找到可以导入的页面。',
+          text: '没有找到可以导入的页面或 PDF。',
         ),
         const SizedBox(height: 8),
         Text(
           '导入规则：所选目录下的 HTML 会直接导入；它的一级子目录也会被遍历，'
-          '其中的 HTML（含更深层的）同样会成为书签。',
+          '其中的 HTML（含更深层的）同样会成为书签。PDF 只取所选目录下（不含子目录）的那些，'
+          '书签名就是文件名（去掉 .pdf）。',
           style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
         ),
-        if (plan.subdirectories.isEmpty && plan.rootLevelHtmlCount == 0) ...[
+        if (plan.subdirectories.isEmpty &&
+            plan.rootLevelHtmlCount == 0 &&
+            plan.rootLevelPdfCount == 0) ...[
           const SizedBox(height: 8),
           Text(
-            '这个目录下既没有 HTML 文件，也没有一级子目录。',
+            '这个目录下既没有 HTML 文件，也没有 PDF 文件，也没有一级子目录。',
             style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
           ),
         ],
@@ -866,7 +911,11 @@ class _BookmarkImportDialogState extends State<_BookmarkImportDialog> {
         Text('预览', style: theme.textTheme.titleSmall),
         const SizedBox(height: 2),
         Text(
-          '标题按上面选定的「标题来源」生成。',
+          plan.pageCount == 0
+              ? 'PDF 的书签名就是文件名（去掉 .pdf）。'
+              : plan.pdfCount == 0
+                  ? '标题按上面选定的「标题来源」生成。'
+                  : 'HTML 的标题按上面选定的「标题来源」生成；PDF 直接用文件名。',
           style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
         ),
         if (decision.nameConflictCount > 0) ...[
@@ -898,10 +947,10 @@ class _BookmarkImportDialogState extends State<_BookmarkImportDialog> {
     );
   }
 
-  /// One preview line: the name the page will actually be bookmarked with, the
-  /// subdirectory it came from, and a 重名 tag when a name clash will leave it
-  /// out. A `留空` name is shown as a grey placeholder because the tile would
-  /// fall back to the address.
+  /// One preview line: the name the file will actually be bookmarked with, the
+  /// subdirectory it came from, a `PDF` tag for a document and a 重名 tag when a
+  /// name clash will leave it out. A `留空` name is shown as a grey placeholder
+  /// because the tile would fall back to the address.
   Widget _previewRow(
     ThemeData theme,
     ImportCandidate candidate, {
@@ -926,6 +975,15 @@ class _BookmarkImportDialogState extends State<_BookmarkImportDialog> {
                   : theme.textTheme.bodyMedium,
             ),
           ),
+          if (candidate.isPdf) ...[
+            const SizedBox(width: 8),
+            Text(
+              'PDF',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.primary,
+              ),
+            ),
+          ],
           if (conflict) ...[
             const SizedBox(width: 8),
             Text(
@@ -1024,6 +1082,8 @@ class _BookmarkImportDialogState extends State<_BookmarkImportDialog> {
     final theme = Theme.of(context);
     switch (_scope) {
       case BookmarkWhitelistScope.directory:
+        final pdfCount = _plan?.pdfCount ?? 0;
+        final pdfOnly = (_plan?.pageCount ?? 0) == 0 && pdfCount > 0;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1035,15 +1095,24 @@ class _BookmarkImportDialogState extends State<_BookmarkImportDialog> {
             ),
             const SizedBox(height: 2),
             Text(
-              '一条规则覆盖全部页面，连带这些页面引用的同目录素材。',
+              pdfCount > 0
+                  ? '一条规则覆盖全部页面和 PDF，连带这些页面引用的同目录素材。'
+                  : '一条规则覆盖全部页面，连带这些页面引用的同目录素材。',
               style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
             ),
+            if (pdfOnly) ...[
+              const SizedBox(height: 2),
+              Text(
+                'PDF 只需要文件本身，选「每个文件各自放行」可以只放开这几个 PDF。',
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+              ),
+            ],
           ],
         );
       case BookmarkWhitelistScope.perFile:
         final count = _plan?.fileCount ?? 0;
         return Text(
-          '每个页面各自添加一条白名单规则，共 $count 条；同目录的其他素材不会被放行。',
+          '每个文件各自添加一条白名单规则，共 $count 条；同目录的其他素材不会被放行。',
           style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
         );
       case BookmarkWhitelistScope.none:
@@ -1082,10 +1151,10 @@ class _BookmarkImportDialogState extends State<_BookmarkImportDialog> {
 
 // ------------------------------------------------------- import report dialog
 
-/// How many conflicting pages the report lists before it collapses.
+/// How many conflicting files the report lists before it collapses.
 const int _conflictLimit = 20;
 
-/// The post-import 重名 report: what was imported, and exactly which pages were
+/// The post-import 重名 report: what was imported, and exactly which files were
 /// left out because another bookmark already carried their name.
 class _ImportNameConflictDialog extends StatelessWidget {
   const _ImportNameConflictDialog({required this.outcome});
@@ -1112,7 +1181,7 @@ class _ImportNameConflictDialog extends StatelessWidget {
               Text(outcome.summary, style: theme.textTheme.bodyMedium),
               const SizedBox(height: 10),
               Text(
-                '下面这些页面没有导入：它们要用的书签名和已有书签'
+                '下面这些文件没有导入：它们要用的书签名和已有书签'
                 '（或本次先导入的书签）重复了。想让它们进首页，'
                 '可以单独添加，或改一个标题后重新导入。',
                 style: theme.textTheme.bodySmall?.copyWith(
@@ -1152,7 +1221,7 @@ class _ImportNameConflictDialog extends StatelessWidget {
     );
   }
 
-  /// One skipped page: the name it wanted, and the file it came from.
+  /// One skipped file: the name it wanted, and the file it came from.
   Widget _row(
     BuildContext context,
     ThemeData theme,

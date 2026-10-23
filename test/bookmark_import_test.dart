@@ -23,6 +23,13 @@ void main() {
     );
   }
 
+  /// A stand-in PDF: the scan never parses the file, it only lists it.
+  void writePdf(String path) {
+    final file = File(path);
+    file.parent.createSync(recursive: true);
+    file.writeAsStringSync('%PDF-1.4\n% fake document\n');
+  }
+
   setUp(() {
     root = Directory.systemTemp.createTempSync('tb_import_root');
     appDir = Directory.systemTemp.createTempSync('tb_import_app');
@@ -160,6 +167,109 @@ void main() {
         served.candidates.every((c) => c.url.startsWith('http://127.0.0.1:8787/')),
         isTrue,
       );
+    });
+  });
+
+  group('PDF import', () {
+    test('finds the PDFs directly in the chosen directory, never in subfolders',
+        () async {
+      writePdf('${root.path}/数学练习册.pdf');
+      writePdf('${root.path}/math/不该导入.pdf');
+      // An uppercase extension is the same document.
+      writePdf('${root.path}/字母.PDF');
+
+      final plan = await BookmarkImporter.scan(root.path);
+
+      expect(plan.rootLevelPdfCount, 2);
+      expect(plan.pdfCount, 2);
+      // The HTML pages are unaffected by the PDFs beside them.
+      expect(plan.pageCount, 4);
+      expect(plan.fileCount, 6);
+      final pdf = plan.candidates.firstWhere(
+        (candidate) => candidate.filePath.endsWith('数学练习册.pdf'),
+      );
+      // Named after the file, without the extension, and read from the chosen
+      // directory (empty subdirectory label), not from a folder.
+      expect(pdf.isPdf, isTrue);
+      expect(pdf.title, '数学练习册');
+      expect(pdf.subdirectory, isEmpty);
+      expect(Uri.decodeFull(pdf.url), 'file://${root.path}/数学练习册.pdf');
+      expect(
+        plan.candidates.any((candidate) => candidate.filePath.endsWith('不该导入.pdf')),
+        isFalse,
+      );
+      expect(
+        plan.candidates.firstWhere((c) => c.filePath.endsWith('字母.PDF')).title,
+        '字母',
+      );
+    });
+
+    test('a PDF keeps its file name whatever 标题来源 the batch uses', () async {
+      writePdf('${root.path}/第 1 课.pdf');
+
+      final plan = await BookmarkImporter.scan(root.path);
+      final pdf = plan.candidates.singleWhere((candidate) => candidate.isPdf);
+
+      for (final source in LocalPageTitleSource.values) {
+        expect(pdf.titleFor(source), '第 1 课');
+      }
+    });
+
+    test('the chosen directory\'s HTML pages still come before its PDFs',
+        () async {
+      // Sorted by name this PDF would come first; the pages stay in front.
+      writePdf('${root.path}/a.pdf');
+
+      final plan = await BookmarkImporter.scan(root.path);
+
+      expect(plan.candidates.first.filePath.endsWith('top.html'), isTrue);
+      expect(plan.candidates[1].filePath.endsWith('a.pdf'), isTrue);
+      expect(plan.candidates[1].isPdf, isTrue);
+      // The subdirectories' pages come after both.
+      expect(plan.candidates[2].isPdf, isFalse);
+    });
+
+    test('a folder of PDFs is enough to import something', () async {
+      final books = Directory('${root.path}/电子书')..createSync();
+      writePdf('${books.path}/拼音.pdf');
+      writePdf('${books.path}/汉字.pdf');
+
+      final plan = await BookmarkImporter.scan(books.path);
+
+      expect(plan.pageCount, 0);
+      expect(plan.pdfCount, 2);
+      expect(plan.rootLevelHtmlCount, 0);
+      expect(plan.rootLevelPdfCount, 2);
+      expect(plan.isEmpty, isFalse);
+      expect(
+        plan.candidates.map((candidate) => candidate.title).toSet(),
+        {'拼音', '汉字'},
+      );
+    });
+
+    test('a PDF counts against the file cap like any other file', () async {
+      writePdf('${root.path}/a.pdf');
+
+      final plan = await BookmarkImporter.scan(root.path, maxFiles: 2);
+
+      expect(plan.fileCount, 2);
+      expect(plan.candidates.map((c) => c.isPdf), [false, true]);
+      expect(plan.truncated, isTrue);
+    });
+
+    test('a PDF is addressed over loopback when it sits in the served root',
+        () async {
+      writePdf('${root.path}/数学练习册.pdf');
+
+      final plan = await BookmarkImporter.scan(
+        root.path,
+        localServerBase: 'http://127.0.0.1:8787',
+        localServerRoot: root.path,
+      );
+
+      final pdf = plan.candidates.singleWhere((candidate) => candidate.isPdf);
+      expect(pdf.url, startsWith('http://127.0.0.1:8787/'));
+      expect(pdf.url, endsWith('.pdf'));
     });
   });
 
@@ -527,6 +637,99 @@ void main() {
       );
       expect(again.summary, contains('已导入 0 个书签'));
       expect(again.summary, contains('跳过 4 个'));
+    });
+
+    test('imports the PDFs beside the pages, named after the file', () async {
+      writePdf('${root.path}/练习册.pdf');
+
+      final outcome = await state.importBookmarksFromDirectory(
+        directoryPath: root.path,
+        categoryId: uncategorizedId,
+        whitelistScope: BookmarkWhitelistScope.none,
+        // The HTML pages follow this; the PDF ignores it.
+        titleSource: LocalPageTitleSource.directoryName,
+      );
+
+      expect(outcome.added, 5);
+      expect(outcome.addedPdfCount, 1);
+      expect(outcome.addedPageCount, 4);
+      final pdf = state.bookmarks.singleWhere((bookmark) => bookmark.url.endsWith('.pdf'));
+      expect(pdf.title, '练习册');
+      expect(pdf.url.startsWith('file://'), isTrue);
+      expect(outcome.summary, '已导入 5 个书签（HTML 4 个、PDF 1 个）');
+    });
+
+    test('the whole-directory rule also covers the imported PDFs', () async {
+      writePdf('${root.path}/练习册.pdf');
+
+      await state.importBookmarksFromDirectory(
+        directoryPath: root.path,
+        categoryId: uncategorizedId,
+        whitelistScope: BookmarkWhitelistScope.directory,
+      );
+
+      expect(state.policy.rulesOf(PolicyListKind.whitelist), hasLength(1));
+      final pdfUrl = state.policyUrl('file://${root.path}/练习册.pdf');
+      expect(state.engine.decide(pdfUrl).allowed, isTrue);
+    });
+
+    test('the per-file scope grants a PDF a rule of its own', () async {
+      writePdf('${root.path}/练习册.pdf');
+
+      await state.importBookmarksFromDirectory(
+        directoryPath: root.path,
+        categoryId: uncategorizedId,
+        whitelistScope: BookmarkWhitelistScope.perFile,
+      );
+
+      expect(state.policy.rulesOf(PolicyListKind.whitelist), hasLength(5));
+      final pdfUrl = state.policyUrl('file://${root.path}/练习册.pdf');
+      expect(state.engine.decide(pdfUrl).allowed, isTrue);
+      expect(state.engine.decide('https://example.com/').allowed, isFalse);
+    });
+
+    test('a PDF whose name is taken is skipped and reported like a page',
+        () async {
+      writePdf('${root.path}/练习册.pdf');
+      await state.addBookmark(
+        url: 'https://school.test/books',
+        title: '练习册',
+        addToWhitelist: false,
+      );
+
+      final outcome = await state.importBookmarksFromDirectory(
+        directoryPath: root.path,
+        categoryId: uncategorizedId,
+        whitelistScope: BookmarkWhitelistScope.none,
+      );
+
+      expect(outcome.added, 4);
+      expect(outcome.addedPdfCount, 0);
+      expect(outcome.nameConflicts, hasLength(1));
+      expect(outcome.nameConflicts.single.fileName, '练习册.pdf');
+      expect(outcome.nameConflicts.single.title, '练习册');
+    });
+
+    test('a folder of nothing but PDFs imports all of them', () async {
+      final books = Directory('${root.path}/电子书')..createSync();
+      writePdf('${books.path}/拼音.pdf');
+      writePdf('${books.path}/汉字.pdf');
+
+      final outcome = await state.importBookmarksFromDirectory(
+        directoryPath: books.path,
+        categoryId: uncategorizedId,
+        whitelistScope: BookmarkWhitelistScope.none,
+      );
+
+      expect(outcome.added, 2);
+      expect(outcome.addedPdfCount, 2);
+      expect(outcome.addedPageCount, 0);
+      expect(outcome.summary, '已导入 2 个书签（PDF）');
+      expect(
+        state.bookmarksIn(uncategorizedId).map((b) => b.title).toSet(),
+        {'拼音', '汉字'},
+      );
+      expect(state.bookmarks.every((b) => b.url.endsWith('.pdf')), isTrue);
     });
 
     test('imported bookmarks can be reordered and moved like any other', () async {

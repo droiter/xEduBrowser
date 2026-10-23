@@ -1385,13 +1385,15 @@ class AppState extends ChangeNotifier {
   // --------------------------------------------------------------- import
 
   /// Imports every HTML page found in the **first-level subdirectories** of
-  /// [directoryPath] into [categoryId].
+  /// [directoryPath], plus the HTML pages and the PDFs sitting directly in it,
+  /// into [categoryId].
   ///
   /// See [BookmarkImporter.scan] for the traversal rules and
-  /// [BookmarkWhitelistScope] for what to grant. Pages already bookmarked are
+  /// [BookmarkWhitelistScope] for what to grant. Files already bookmarked are
   /// skipped rather than duplicated. [titleSource] picks the bookmark name the
   /// way the add-bookmark dialog's 标题来源 dropdown does; a page whose chosen
-  /// source is empty falls back to its file name.
+  /// source is empty falls back to its file name. A PDF ignores [titleSource]
+  /// entirely: it is always named after its file name.
   Future<BookmarkImportOutcome> importBookmarksFromDirectory({
     required String directoryPath,
     required String categoryId,
@@ -1418,11 +1420,12 @@ class AppState extends ChangeNotifier {
   /// The import dialog shows this (so the preview can mark the pages that will
   /// be left out) and [applyImportPlan] reuses it, which keeps the two in step.
   ///
-  /// A page is left out when its address is already bookmarked, or when the
+  /// A file is left out when its address is already bookmarked, or when the
   /// name the chosen [titleSource] gives it is **already taken** — by a bookmark
-  /// in the library, or by an earlier page of the same batch, so a single import
+  /// in the library, or by an earlier file of the same batch, so a single import
   /// never produces two same-named tiles. Names are compared through
-  /// [bookmarkTitleKey]; a `留空` name reserves nothing and never clashes.
+  /// [bookmarkTitleKey]; a `留空` name reserves nothing and never clashes. A PDF
+  /// takes its file name whatever [titleSource] says.
   BookmarkImportDecision previewImport(
     BookmarkImportPlan plan, {
     LocalPageTitleSource titleSource = LocalPageTitleSource.internalTitle,
@@ -1522,9 +1525,11 @@ class AppState extends ChangeNotifier {
       await _persistBookmarks();
     }
 
+    final addedPdfCount = decision.additions.where((c) => c.isPdf).length;
     logEvent(
       'import',
       '导入「${_lastSegment(plan.rootPath)}」：新增 ${added.length} 个'
+          '${addedPdfCount > 0 ? '（含 $addedPdfCount 个 PDF）' : ''}'
           '${decision.alreadyBookmarked > 0 ? '，跳过 ${decision.alreadyBookmarked} 个（已存在）' : ''}'
           '${decision.nameConflicts.isNotEmpty ? '，跳过 ${decision.nameConflicts.length} 个（重名）' : ''}'
           '${whitelistPattern.isEmpty ? '' : '，白名单：$whitelistPattern'}',
@@ -1532,6 +1537,7 @@ class AppState extends ChangeNotifier {
 
     return BookmarkImportOutcome(
       added: added.length,
+      addedPdfCount: addedPdfCount,
       skipped: decision.alreadyBookmarked,
       subdirectoryCount: plan.subdirectories.length,
       rootPath: plan.rootPath,
