@@ -18,6 +18,12 @@ const Key pdfSpeechHighlightKey = ValueKey<String>('pdf-speech-highlight');
 /// The `1.00x` reading-speed readout next to the title.
 const Key pdfSpeechRateLabelKey = ValueKey<String>('pdf-speech-rate-label');
 
+/// The reading-speed slider, on the title line.
+const Key pdfSpeechRateSliderKey = ValueKey<String>('pdf-speech-rate-slider');
+
+/// The 停止朗读 button, on the title line next to the speed slider.
+const Key pdfSpeechStopKey = ValueKey<String>('pdf-speech-stop');
+
 /// A PDF bookmark, read page by page.
 ///
 /// Android's WebView cannot display a PDF, so the native side renders one page
@@ -603,11 +609,12 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
     );
   }
 
-  /// Title, page counter and reading speed on **one** line.
+  /// Title, page counter and the whole speech control (speed slider, readout,
+  /// stop) on **one** line.
   ///
-  /// Both numbers used to live in the bottom bar, which then needed two rows
-  /// and ate into the page. On the title line they cost no height at all, so
-  /// the bottom strip is a single row of controls and the page gets the rest.
+  /// All of it used to live in the bottom bar, which then needed two rows and
+  /// ate into the page. On the title line it costs no height at all, so the
+  /// bottom strip only turns pages and the page gets the rest.
   PreferredSizeWidget _appBar(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final TextStyle? metrics = theme.textTheme.titleSmall?.copyWith(
@@ -618,13 +625,35 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
       title: Text(_titleLine, maxLines: 1, overflow: TextOverflow.ellipsis),
       actions: <Widget>[
         Text(_pager.label, key: pdfPageIndicatorKey, style: metrics),
-        const SizedBox(width: 16),
+        const SizedBox(width: 10),
+        SizedBox(
+          // Wide enough for a finger to hit six speed stops on a tablet.
+          width: 160,
+          child: Slider(
+            key: pdfSpeechRateSliderKey,
+            value: _speechRate,
+            min: 0.5,
+            max: 2.0,
+            divisions: 6,
+            label: '${_speechRate.toStringAsFixed(2)}x',
+            onChanged: _onSpeechRateChanged,
+            onChangeEnd: (double value) =>
+                unawaited(_onSpeechRateCommitted(value)),
+          ),
+        ),
         Text(
           '${_speechRate.toStringAsFixed(2)}x',
           key: pdfSpeechRateLabelKey,
           style: metrics,
         ),
-        const SizedBox(width: 18),
+        IconButton(
+          key: pdfSpeechStopKey,
+          tooltip: '停止朗读',
+          visualDensity: VisualDensity.compact,
+          onPressed: _speakingLine == null ? null : _stopSpeech,
+          icon: const Icon(Icons.stop_circle_outlined),
+        ),
+        const SizedBox(width: 6),
       ],
     );
   }
@@ -767,18 +796,16 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
     );
   }
 
-  /// One compact row: turn the page, set the reading speed, stop the speech.
+  /// One compact row: page turning only.
   ///
-  /// The page counter and the speed value are on the title line (see [_appBar]),
-  /// so this strip only carries what needs a finger.
+  /// The page counter and every speech control are on the title line (see
+  /// [_appBar]), so this strip is the only height the page loses.
   Widget _bottomBar(BuildContext context) {
     return Material(
       color: Colors.black87,
       elevation: 8,
       child: SafeArea(
         top: false,
-        // An explicit height: a [Slider] in an unbounded-height [Row] would
-        // otherwise claim the whole screen and squeeze the page out of layout.
         child: SizedBox(
           height: 48,
           child: Row(
@@ -792,41 +819,17 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
                     : null,
                 icon: const Icon(Icons.chevron_left),
               ),
-              const Tooltip(
-                message: '朗读语速',
-                child: Icon(
-                  Icons.record_voice_over_outlined,
-                  color: Colors.white70,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 6),
               Expanded(
-                child: SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
-                    trackHeight: 2,
-                    activeTrackColor: Colors.white70,
-                    inactiveTrackColor: Colors.white24,
-                    thumbColor: Colors.white,
-                    overlayColor: Colors.white12,
-                  ),
-                  child: Slider(
-                    value: _speechRate,
-                    min: 0.5,
-                    max: 2.0,
-                    divisions: 6,
-                    label: '${_speechRate.toStringAsFixed(2)}x',
-                    onChanged: _onSpeechRateChanged,
-                    onChangeEnd: (double value) =>
-                        unawaited(_onSpeechRateCommitted(value)),
+                child: Text(
+                  '点文字朗读；左右两侧点击或滑动翻页',
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.55),
+                    fontSize: 12,
                   ),
                 ),
-              ),
-              IconButton(
-                tooltip: '停止朗读',
-                color: Colors.white,
-                onPressed: _speakingLine == null ? null : _stopSpeech,
-                icon: const Icon(Icons.stop_circle_outlined),
               ),
               IconButton(
                 key: pdfNextButtonKey,
@@ -837,7 +840,6 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
                     : null,
                 icon: const Icon(Icons.chevron_right),
               ),
-              const SizedBox(width: 4),
             ],
           ),
         ),

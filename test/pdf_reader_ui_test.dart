@@ -242,38 +242,44 @@ void main() {
     expect(find.byKey(pdfSpeechHighlightKey), findsNothing);
   });
 
-  testWidgets('页码和朗读倍数与标题齐平，底栏只占一行', (tester) async {
+  testWidgets('页码与朗读控件都在标题行，底栏只剩翻页', (tester) async {
     await pumpReader(tester);
 
     final Finder title = find.text('使用说明');
     final Finder pageLabel = find.byKey(pdfPageIndicatorKey);
     final Finder speed = find.byKey(pdfSpeechRateLabelKey);
-    expect(title, findsOneWidget);
+    final Finder slider = find.byKey(pdfSpeechRateSliderKey);
+    final Finder stop = find.byKey(pdfSpeechStopKey);
     expect(pageLabel, findsOneWidget);
     expect(speed, findsOneWidget);
+    expect(slider, findsOneWidget);
+    expect(stop, findsOneWidget);
     expect(tester.widget<Text>(pageLabel).data, '1 / 3');
     expect(tester.widget<Text>(speed).data, '1.00x');
 
-    // Both sit in the app bar, on the title's line.
-    expect(
-      find.descendant(of: find.byType(AppBar), matching: pageLabel),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: find.byType(AppBar), matching: speed),
-      findsOneWidget,
-    );
+    // 页码、倍数、语速滑块、停止按钮全在标题那一行。
+    for (final Finder part in <Finder>[pageLabel, speed, slider, stop]) {
+      expect(
+        find.descendant(of: find.byType(AppBar), matching: part),
+        findsOneWidget,
+        reason: '应位于标题行（AppBar）',
+      );
+    }
     final double titleY = tester.getCenter(title).dy;
-    expect((tester.getCenter(pageLabel).dy - titleY).abs(), lessThan(1.5));
-    expect((tester.getCenter(speed).dy - titleY).abs(), lessThan(1.5));
+    expect((tester.getCenter(pageLabel).dy - titleY).abs(), lessThan(2));
+    expect((tester.getCenter(speed).dy - titleY).abs(), lessThan(2));
+    expect((tester.getCenter(slider).dy - titleY).abs(), lessThan(2));
+    expect((tester.getCenter(stop).dy - titleY).abs(), lessThan(2));
 
-    // The bottom strip is a single row: buttons and slider share one line.
-    final double previousY = tester.getCenter(find.byKey(pdfPreviousButtonKey)).dy;
+    // 底栏没有滑块，只剩上一页 / 提示 / 下一页，同一行。
+    expect(find.byType(Slider), findsOneWidget);
+    expect(find.descendant(of: find.byType(AppBar), matching: slider),
+        findsOneWidget);
+    final double previousY =
+        tester.getCenter(find.byKey(pdfPreviousButtonKey)).dy;
     final double nextY = tester.getCenter(find.byKey(pdfNextButtonKey)).dy;
-    final double sliderY = tester.getCenter(find.byType(Slider)).dy;
     expect(previousY, moreOrLessEquals(nextY, epsilon: 1));
-    expect(previousY, moreOrLessEquals(sliderY, epsilon: 2));
-    // Nothing from the old second row survives over the page.
+    expect(find.textContaining('左右两侧点击或滑动翻页'), findsOneWidget);
     expect(find.text('朗读语速'), findsNothing);
   });
 
