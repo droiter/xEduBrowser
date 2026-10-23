@@ -319,6 +319,51 @@ void main() {
     );
   });
 
+  testWidgets('翻回已缓存的页时，预渲染不会把它挤出缓存变成黑屏',
+      (tester) async {
+    final rendered = <int>[];
+    mockCommandHandler((call) async {
+      switch (call.method) {
+        case 'pdfPageCount':
+          return 8;
+        case 'renderPdfPage':
+          rendered.add(((call.arguments as Map)['index'] as num).toInt());
+          return pageBytes;
+        default:
+          return null;
+      }
+    });
+
+    await pumpReader(tester);
+    final Rect page = tester.getRect(find.byType(PageView));
+    Future<void> tapAt(double dx) async {
+      await tester.tapAt(Offset(dx, page.center.dy));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+
+    // 前进五页：0 → 1 → 2 → 3 → 4 → 5，缓存装到上限。
+    for (var i = 0; i < 5; i++) {
+      await tapAt(page.right - 20);
+    }
+    expect(indicator(tester), '6 / 8');
+
+    // 往左翻四页回到第 2 页（索引 1）。这一页一直在缓存里，翻到它时不应
+    // 因为要渲染索引 0 而被挤掉——那正是"页面显示了又黑屏"的原因。
+    for (var i = 0; i < 4; i++) {
+      await tapAt(page.left + 20);
+    }
+    expect(indicator(tester), '2 / 8');
+
+    expect(find.text('正在渲染第 2 页…'), findsNothing);
+    expect(find.byType(Image), findsWidgets);
+    expect(
+      rendered.where((index) => index == 1),
+      hasLength(1),
+      reason: '已缓存的这一页不该被邻居的预渲染踢掉后再重渲',
+    );
+  });
+
   testWidgets('a render that never answers becomes 重试, not an endless spinner',
       (tester) async {
     var wedged = true;

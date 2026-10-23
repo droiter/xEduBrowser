@@ -42,7 +42,11 @@ class PdfReaderScreen extends StatefulWidget {
 
 class _PdfReaderScreenState extends State<PdfReaderScreen> {
   /// How many rendered pages are kept around, so back-and-forth stays instant.
-  static const int _cacheLimit = 4;
+  ///
+  /// The page on screen and its two neighbours are pinned (see
+  /// [_evictionCandidate]); the rest of the budget is history, which is what a
+  /// reader flipping back and forth through an ebook lives on.
+  static const int _cacheLimit = 6;
 
   /// Rendered page width in pixels; the platform renderer caps this too.
   static const int _renderWidth = 1400;
@@ -105,6 +109,10 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
   PdfTextLine? _speakingLine;
   String? _utteranceId;
 
+  /// The page [_onPageChanged] last landed on; remembers which way the reader is
+  /// moving, so the next render goes to the page they are flipping towards.
+  int _lastSeenPage = 0;
+
   PdfPager _pager = PdfPager(pageCount: 0);
   bool _loadingDocument = true;
   String? _documentError;
@@ -163,12 +171,13 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
     _pumpRenders();
   }
 
-  /// Makes the pages around [index] the ones to render: [index] first, then its
-  /// neighbours. Everything else queued is stale and dropped — that is what
-  /// keeps a fast flip from stacking up a backlog.
-  void _wantPage(int index) {
+  /// Makes the pages around [index] the ones to render: [index] first, then the
+  /// neighbour the reader is moving towards, then the other one. Everything else
+  /// queued is stale and dropped — that is what keeps a fast flip from stacking
+  /// up a backlog.
+  void _wantPage(int index, {int direction = 1}) {
     _renderQueue.clear();
-    for (final int page in <int>[index, index + 1, index - 1]) {
+    for (final int page in <int>[index, index + direction, index - direction]) {
       if (page < 0 || page >= _pager.pageCount) continue;
       if (_images.containsKey(page) || _failed.contains(page)) continue;
       if (_rendering == page || _renderQueue.contains(page)) continue;
@@ -268,16 +277,36 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
     });
   }
 
-  /// Stores a rendered page, dropping the oldest ones beyond [_cacheLimit].
+  /// Stores a rendered page, dropping the least useful ones beyond [_cacheLimit].
+  ///
+  /// The page on screen is never dropped. Evicting it was the "the page showed
+  /// and then immediately went black with 正在渲染" bug: prefetching a page two
+  /// steps away could push the page the reader was looking at out of the cache,
+  /// and the next rebuild fell back to the spinner.
   void _putImage(int index, Uint8List bytes) {
     _images[index] = bytes;
     _cacheOrder
       ..remove(index)
       ..add(index);
     while (_cacheOrder.length > _cacheLimit) {
-      final dropped = _cacheOrder.removeAt(0);
-      _images.remove(dropped);
+      final int position = _evictionCandidate();
+      if (position < 0) break;
+      _images.remove(_cacheOrder.removeAt(position));
     }
+  }
+
+  /// Position in [_cacheOrder] of the least useful cached page, or -1 when every
+  /// cached page is one the reader may be looking at right now.
+  int _evictionCandidate() {
+    final int current = _pager.pageCount == 0 ? -1 : _pager.index;
+    for (var position = 0; position < _cacheOrder.length; position++) {
+      final int page = _cacheOrder[position];
+      // The page on screen must not vanish under the reader, and its neighbours
+      // are one swipe away: keep all three.
+      if (current >= 0 && (page - current).abs() <= 1) continue;
+      return position;
+    }
+    return -1;
   }
 
   /// Loads the text layer of [index] once; failure means "no spoken text here".
@@ -349,10 +378,15 @@ class _PdfReaderScreenState extends State<PdfReaderScreen> {
   void _onPageChanged(int index) {
     if (_speakingPage != null && _speakingPage != index) _stopSpeech();
     _pager.goTo(index);
+    // Which way the reader is moving decides which neighbour is worth rendering
+    // first: flipping back through an ebook must not spend the one render on
+    // the page they have just left.
+    final int direction = index >= _lastSeenPage ? 1 : -1;
+    _lastSeenPage = index;
     setState(() {});
     // The page on screen is what matters now; whatever was queued for pages
     // already flipped past is dropped inside [_wantPage].
-    _wantPage(index);
+    _wantPage(index, direction: direction);
     _prefetchText(index);
     _prefetchText(index + 1);
     _prefetchText(index - 1);
